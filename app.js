@@ -1758,6 +1758,16 @@ function seed() {
   });
 }
 
+function openExportMenu() {
+  $('#exportMenu').hidden = false;
+  $('#exportMenuBtn').setAttribute('aria-expanded', 'true');
+}
+
+function closeExportMenu() {
+  $('#exportMenu').hidden = true;
+  $('#exportMenuBtn').setAttribute('aria-expanded', 'false');
+}
+
 function init() {
   if (!load()) seed();
 
@@ -1779,7 +1789,15 @@ function init() {
   $('#undo').addEventListener('click', undo);
   $('#redo').addEventListener('click', redo);
   $('#exportPdf').addEventListener('click', () => exportSheet('pdf'));
-  $('#exportPng').addEventListener('click', () => exportSheet('png'));
+  $('#exportPng').addEventListener('click', () => { exportSheet('png'); closeExportMenu(); });
+  $('#exportMenuBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    $('#exportMenu').hidden ? openExportMenu() : closeExportMenu();
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.split')) closeExportMenu();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeExportMenu(); });
 
   $('#paper').addEventListener('change', e => {
     state.paper = e.target.value;
