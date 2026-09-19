@@ -63,6 +63,7 @@ const blankDoc = n => ({ panels: Array.from({ length: n }, blankPanel) });
 let state = {
   v: 1, paper: 'a4', title: 'untitled zine', active: 0,
   margin: 5,                        // mm of unprintable edge to stay clear of
+  trimMargin: false,                // trim that edge off after printing, for an edge-to-edge zine
   cut: true,                        // print a guide along the slit
   guides: false,                    // print dotted panel outlines
   docs: { mini: blankDoc(8) }
@@ -153,6 +154,7 @@ function load() {
       title: typeof s.title === 'string' ? s.title : 'untitled zine',
       active: 0,
       margin: clampMargin(s.margin == null ? 5 : s.margin),
+      trimMargin: !!s.trimMargin,
       cut: s.cut !== false,
       guides: !!s.guides,
       docs: { mini: fixDoc(s.docs.mini, 8) }
@@ -962,7 +964,9 @@ function foldDiagram() {
     '<text x="4" y="8">print one side, landscape</text>' + cells + band +
     '<line class="cut" x1="' + (x0 + cw) + '" y1="' + (y0 + ch) + '" x2="' + (x0 + cw * 3) + '" y2="' + (y0 + ch) + '"/>' +
     '<text x="4" y="' + (y0 + ch * 2 + 12) + '">red line = cut the slit' +
-    (mmv > 0 ? ', dashed = printable area' : '') + '</text></svg>';
+    (mmv > 0 ? ', dashed = printable area' +
+      (state.trimMargin ? ' (trim that band off after folding)' : '') : '') +
+    '</text></svg>';
 }
 
 function buildInspector() {
@@ -1105,6 +1109,14 @@ function inspectorForPage() {
         '<input type="range" min="0" max="20" step="0.5" data-margin value="' + state.margin + '"></div>' +
         '<div><input class="num" type="number" min="0" max="25" step="0.5" data-margin value="' +
         state.margin + '"></div><span class="hint">mm</span></div></div>' +
+      '<div class="row">' +
+        '<label class="f" style="margin:0;flex:1">After printing</label>' +
+        '<div class="seg"><button data-trim="0"' + on(!state.trimMargin) + '>Leave border</button>' +
+        '<button data-trim="1"' + on(state.trimMargin) + '>Trim it off</button></div></div>' +
+      (state.trimMargin && state.margin > 0
+        ? '<div class="hint">A cut line prints ' + state.margin + ' mm in from the sheet edge.</div>'
+        : '') +
+    '</div>' +
 
     '<div class="grp"><h2>Print guides</h2>' +
       '<div class="row">' +
@@ -1161,17 +1173,26 @@ function helpHtml() {
     '<p>Print the exported PDF on one side of a single sheet. Fold in half the ' +
       'long way, then in half twice more. Unfold to the long half-fold, cut the ' +
       'slit, then push the ends together and fold into a booklet.</p>' +
-    '<p>No trimming is needed: every fold lands on the middle of the paper, which ' +
-      'is exactly where the panel edges are.</p>' +
+    '<p>No trimming is needed for the folds themselves: every fold lands on the ' +
+      'middle of the paper, which is exactly where the panel edges are.</p>' +
+    (state.trimMargin && state.margin > 0
+      ? '<p>With &ldquo;Trim it off&rdquo; on, there is one more step: once folded, ' +
+        'square up the booklet and trim ' + state.margin + ' mm off the top, bottom ' +
+        'and open edge (not the spine) with a paper cutter, following the line printed ' +
+        'near the edge. That strip was always blank &mdash; the printer cannot reach it ' +
+        '&mdash; so cutting it away just removes the border, giving an edge-to-edge zine.</p>'
+      : '') +
 
     '<h3>Print guides</h3>' +
     '<p>' +
       (state.guides ? 'Dotted lines mark every panel edge. ' : '') +
       (state.cut ? 'A solid line marks the slit. ' : '') +
-      (state.guides || state.cut
-        ? 'Both fall on creases &mdash; the outlines are the folds, and the ' +
-          'scissors go through the cut line &mdash; so a tidy fold hides them.'
-        : 'Both are off, so nothing is printed over the artwork; use the diagram above.') +
+      (state.trimMargin && state.margin > 0 ? 'A solid line near the sheet edge marks the trim. ' : '') +
+      (state.guides || state.cut || (state.trimMargin && state.margin > 0)
+        ? 'These fall on creases or cuts you are making anyway &mdash; the outlines are ' +
+          'the folds, the middle line is the slit, and the outer one is the trim &mdash; ' +
+          'so a tidy fold and cut hides them.'
+        : 'All are off, so nothing is printed over the artwork; use the diagram above.') +
     '</p>' +
 
     '<h3>Files</h3>' +
@@ -1223,7 +1244,13 @@ function marginNote() {
       ? where + sides.join(' and ') + ' edge' + (sides.length > 1 ? 's are' : ' is') +
         ' clipped, leaving ' + safeW.toFixed(1) + ' × ' + safeH.toFixed(1) + ' mm to work in.'
       : 'This panel is in the middle of the sheet, so none of it is clipped.') +
-    '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
+    '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.' +
+    (state.trimMargin
+      ? ' Fold first, then trim that ' + state.margin + ' mm strip off the booklet’s ' +
+        'open edges &mdash; the line printed on the sheet shows where. That leaves an ' +
+        'edge-to-edge zine with no blank border, just a touch smaller.'
+      : ' Turn on &ldquo;Trim it off&rdquo; below if you plan to cut this border away ' +
+        'after printing, for an edge-to-edge result.');
 }
 
 function wireInspector() {
@@ -1268,7 +1295,7 @@ function wireInspector() {
     applyTemplate(TEMPLATES[+b.dataset.tpl]);
   }));
 
-  [['data-cut', 'cut'], ['data-guides', 'guides']].forEach(pair => {
+  [['data-cut', 'cut'], ['data-guides', 'guides'], ['data-trim', 'trimMargin']].forEach(pair => {
     side.querySelectorAll('[' + pair[0] + ']').forEach(b => b.addEventListener('click', () => {
       state[pair[1]] = b.getAttribute(pair[0]) === '1';
       buildInspector(); save();
@@ -1391,6 +1418,8 @@ function buildSheetNode() {
      Both land on creases: the panel outlines are exactly the fold lines, and
      the scissors go straight through the cut line, so a clean fold and cut
      leaves neither of them showing on the finished zine. */
+  const m = clampMargin(state.margin) * PT;
+
   if (state.guides || state.cut) {
     const svg = guideOverlay(g);
     if (state.guides) {
@@ -1406,12 +1435,23 @@ function buildSheetNode() {
     root.appendChild(svg);
   }
 
-  const m = clampMargin(state.margin) * PT;
   if (m > 0) {
     const rim = document.createElement('div');
     rim.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;' +
       'box-sizing:border-box;border:' + m + 'px solid #ffffff';
     root.appendChild(rim);
+  }
+
+  /* Trimming is done after folding, on the assembled booklet's open edges, so
+     the geometry above is untouched — this just prints a guide for the
+     scissors, sitting right where the margin gives way to printed content. */
+  if (state.trimMargin && m > 0) {
+    const trim = guideOverlay(g);
+    guideStroke(trim, m, m, g.sheetW - m, m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, m, g.sheetH - m, g.sheetW - m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, m, m, m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, g.sheetW - m, m, g.sheetW - m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    root.appendChild(trim);
   }
   return root;
 }
@@ -1531,7 +1571,7 @@ function download(blob, name) {
 
    { "format": "zine", "formatVersion": 2, "app": "zinemaker",
      "saved": <ISO 8601>, "title": string,
-     "paper": "a4"|"letter", "margin": <mm>,
+     "paper": "a4"|"letter", "margin": <mm>, "trimMargin": bool,
      "cut": bool, "guides": bool,
      "assets": [ { "type": <mime>, "bytes": <length> }, ... ],
      "docs": { "mini": { "panels": [ 8 ] } } }
@@ -1601,7 +1641,7 @@ async function saveZine() {
     format: 'zine', formatVersion: ZINE_FORMAT, app: 'zinemaker',
     saved: new Date().toISOString(),
     title: state.title, paper: state.paper,
-    margin: state.margin, cut: state.cut, guides: state.guides,
+    margin: state.margin, trimMargin: state.trimMargin, cut: state.cut, guides: state.guides,
     assets: assets.map(a => ({ type: a.type, bytes: a.bytes.length })),
     docs: docs
   };
@@ -1695,6 +1735,7 @@ async function openZine(file) {
   state.title = typeof data.title === 'string' ? data.title : 'untitled zine';
   state.paper = PAPER[data.paper] ? data.paper : 'a4';
   state.margin = clampMargin(data.margin == null ? 5 : data.margin);
+  state.trimMargin = !!data.trimMargin;
   state.cut = data.cut !== false;
   state.guides = !!data.guides;
   state.docs = { mini: fixDoc(data.docs.mini, 8) };

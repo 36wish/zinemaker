@@ -251,6 +251,59 @@ module.exports = {
       assert.eq(ink, 0, 'a blank zine with no guides should render as blank paper');
     });
 
+    t.check('the trim line is absent unless "Trim it off" is switched on', async () => {
+      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: false });
+      const ink = await page.evaluate(`(async () => {
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 150 / 72);
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] < 245) n++;
+        return n;
+      })()`);
+      assert.eq(ink, 0, 'no trim line should print with the option off');
+    });
+
+    t.check('the trim line prints a rectangle inset by the margin when switched on', async () => {
+      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: true });
+      const r = await page.evaluate(`(async () => {
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const perMm = (300 / 72) * (72 / 25.4);
+        // Project ink onto each axis rather than sampling one row or column,
+        // since a stroke only inks the middle stretch of each side.
+        const colInk = new Array(cv.width).fill(0);
+        const rowInk = new Array(cv.height).fill(0);
+        for (let y = 0; y < cv.height; y++) {
+          for (let x = 0; x < cv.width; x++) {
+            if (d[((y * cv.width) + x) * 4] < 230) { colInk[x]++; rowInk[y]++; }
+          }
+        }
+        const groups = (counts, floor, per) => {
+          const hits = [];
+          counts.forEach((n, i) => { if (n > floor) hits.push(i); });
+          const out = [];
+          hits.forEach(i => {
+            if (out.length && i - out[out.length - 1].last <= 3) {
+              out[out.length - 1].last = i;
+            } else out.push({ first: i, last: i });
+          });
+          return out.map(b => +(((b.first + b.last) / 2) / per).toFixed(2));
+        };
+        return {
+          verticals: groups(colInk, cv.height * 0.3, perMm),
+          horizontals: groups(rowInk, cv.width * 0.3, perMm)
+        };
+      })()`);
+      assert.eq(r.verticals.length, 2, 'expected two vertical trim lines, saw ' + r.verticals.join(', '));
+      assert.near(r.verticals[0], 5, 0.3, 'left trim line');
+      assert.near(r.verticals[1], 297 - 5, 0.3, 'right trim line');
+      assert.eq(r.horizontals.length, 2, 'expected two horizontal trim lines, saw ' + r.horizontals.join(', '));
+      assert.near(r.horizontals[0], 5, 0.3, 'top trim line');
+      assert.near(r.horizontals[1], 210 - 5, 0.3, 'bottom trim line');
+    });
+
     t.check('the on-screen chop band matches the margin and only marks real edges', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(() => {
