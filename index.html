@@ -229,6 +229,16 @@
   .grp { border-top: 1px solid var(--line); padding: 14px 0; }
   .grp:first-child { border-top: none; padding-top: 0; }
   .grp:last-child { padding-bottom: 0; }
+  .side-section {
+    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    color: var(--fg); margin: 22px 0 2px; padding-top: 16px; border-top: 2px solid var(--line);
+  }
+  .side-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .side-section small {
+    display: block; font-size: 10px; font-weight: 400; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--dim); margin-top: 3px;
+  }
+  .side-section + .grp { border-top: none; padding-top: 8px; }
   .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .row > * { min-width: 0; }
   .row .grow { flex: 1; }
