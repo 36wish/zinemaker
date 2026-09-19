@@ -1083,17 +1083,22 @@ function templateThumb(tpl) {
 
 function inspectorForPage() {
   const g = geom();
-  return '<h2>Page</h2>' +
+  return '<div class="side-section">This page<small>Panel ' + (state.active + 1) + ' of 8' +
+      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</small></div>' +
+
     '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
       '<input type="color" data-page="bg" value="' + panel().bg + '"></div>' +
-      '<div class="hint" style="margin-top:10px">Panel ' + (state.active + 1) + ' of 8' +
-      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') +
-      '<br>' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm</div></div>' +
+      '<div class="hint" style="margin-top:10px">' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm</div></div>' +
 
     '<div class="grp"><h2>Layout</h2><div class="tpl-grid">' +
       TEMPLATES.map((t, i) => '<button class="tpl" data-tpl="' + i + '" title="Apply &quot;' +
         esc(t.n) + '&quot;">' + templateThumb(t) + '<span>' + esc(t.n) + '</span></button>').join('') +
     '</div></div>' +
+
+    '<div class="grp"><div class="row">' +
+      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>' +
+
+    '<div class="side-section">Whole project<small>Same on every page</small></div>' +
 
     '<div class="grp"><h2>Printer margin</h2>' +
       '<div class="row"><div class="col">' +
@@ -1114,7 +1119,6 @@ function inspectorForPage() {
     '<div class="grp"><h2>Saved in this browser</h2>' +
       '<div class="hint" id="meterLabel"></div><div class="meter"><i id="meterFill"></i></div>' +
       '<div class="row" style="margin-top:12px">' +
-      '<button class="grow" data-act="clearPanel">Clear panel</button>' +
       '<button class="grow" data-act="clearAll">Start over</button></div></div>';
 }
 
