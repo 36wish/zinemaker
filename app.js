@@ -665,12 +665,20 @@ function setActive(pi) {
   paintAll(); save();
 }
 
+/* The thumbnails, the page labels and the stage padding all change height
+   with the viewport, so measure them rather than assuming a desktop window.
+   Falls back to the desktop figures for the first paint, before the strip
+   exists; paintStrip() calls this again once it does. */
 function fitZoom() {
   const g = geom(), stage = $('#stage'), sheet = $('#sheet');
   const cols = visiblePanels().length;
-  const stripH = 96;
-  const availW = stage.clientWidth - 44;
-  const availH = stage.clientHeight - stripH - 52;
+  const cs = getComputedStyle(stage);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const stripH = $('#strip').offsetHeight || 96;
+  const labelH = $('#sheetLabels').offsetHeight || 22;
+  const availW = stage.clientWidth - padX - 4;
+  const availH = stage.clientHeight - padY - stripH - labelH - 10;
   const z = Math.max(0.15, Math.min(availW / (g.panelW * cols), availH / g.panelH, 2.6));
   curZoom = z;
   sheet.style.transform = 'scale(' + z + ')';
@@ -682,7 +690,7 @@ function fitZoom() {
 
 function paintStrip() {
   const strip = $('#strip'), g = geom();
-  const tz = 58 / g.panelH;
+  const tz = (narrow() ? 46 : 58) / g.panelH;   // all eight have to fit a phone
   const shown = visiblePanels();
   strip.textContent = '';
   doc().panels.forEach((p, i) => {
@@ -707,6 +715,7 @@ function paintStrip() {
     b.addEventListener('click', () => setActive(i));
     strip.appendChild(b);
   });
+  fitZoom();                 // the strip's height is part of the sheet's budget
 }
 
 /* Thumbnails redraw every panel, so coalesce bursts (typing, dragging). */
@@ -809,13 +818,17 @@ function anchorFix(el, dw, dh) {
 
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
+let dragging = false;
 function drag(ev, onMove) {
   const snap = JSON.stringify(state.docs);
   let moved = false;
+  dragging = true;
   const move = e => {
+    if (e.pointerId !== ev.pointerId) return;   // a second finger is not this drag
     e.preventDefault();
     if (!moved) {
       moved = true;
+      lastTap.id = null;            // a gesture that moved is not half a tap
       hist.push(snap);
       if (hist.length > 10) hist.shift();
       future.length = 0;
@@ -823,17 +836,36 @@ function drag(ev, onMove) {
     }
     onMove(e);
   };
-  const up = () => {
+  /* pointercancel as well as pointerup: a touch the browser takes back — a
+     second finger, a system gesture — never sends an up, and the listeners
+     would outlive the gesture. */
+  const up = e => {
+    if (e && e.pointerId !== ev.pointerId) return;
+    dragging = false;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
     if (moved) { paintStripSoon(); syncInspector(); save(); }
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+/* A touch drag has to be cancelled for the element to move at all, and that
+   cancels the synthesised dblclick with it, so touch gets its own double-tap
+   detector. Mouse users keep the real dblclick handler. */
+let lastTap = { id: null, t: 0 };
+function doubleTapped(id, ev) {
+  if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return false;
+  const now = Date.now();
+  const again = lastTap.id === id && now - lastTap.t < 400;
+  lastTap = { id: again ? null : id, t: now };
+  return again;
 }
 
 function onPagePointerDown(ev) {
-  if (ev.button !== 0) return;
+  if (ev.button !== 0 || dragging) return;
   const handle = ev.target.closest('.h');
   const hit = ev.target.closest('.el');
   const pd = ev.target.closest('.panel');
@@ -848,6 +880,11 @@ function onPagePointerDown(ev) {
   const el = selected();
   const node = nodes.get(id);
   if (!el || !node) return;
+
+  if (!handle && el.type === 'text' && doubleTapped(id, ev)) {
+    startEdit(id, false);
+    return;
+  }
 
   if (handle && handle.classList.contains('rot')) {
     const r = node.parentNode.getBoundingClientRect();
@@ -912,6 +949,7 @@ function onKey(e) {
   }
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSel(); return; }
   if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
+  if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
   if (e.key === 'Escape') { select(null); return; }
   const el = selected();
   if (!el) return;
@@ -971,6 +1009,7 @@ function buildInspector() {
   wireInspector();
   updateMeter();
   paintHelp();
+  syncSideBtn();
 }
 
 function inspectorForEl(el) {
@@ -1138,8 +1177,9 @@ function helpHtml() {
       'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7. Click a page, its ' +
       'label above the sheet, or a thumbnail to make it the page that receives ' +
       'new items.</p>' +
-    '<p>Double-click text to edit it. Paste or drop images straight onto the ' +
-      'page, or drop a <b>.zine</b> file to open it.</p>' +
+    '<p>Double-click text to edit it, or double-tap it on a touch screen. Paste ' +
+      'or drop images straight onto the page, or drop a <b>.zine</b> file to ' +
+      'open it.</p>' +
     '<p><kbd>Del</kbd> removes &nbsp; <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates &nbsp; ' +
       '<kbd>&larr;&uarr;&darr;&rarr;</kbd> nudge, with <kbd>Shift</kbd> &times;10. ' +
       '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
@@ -1197,6 +1237,30 @@ function setHelp(open) {
   btn.classList.toggle('on', helpOpen);
   btn.setAttribute('aria-pressed', helpOpen ? 'true' : 'false');
   paintHelp();
+  if (helpOpen && narrow()) setSide(true);     // nowhere else for it to appear
+}
+
+/* -------------------------------------------------------- the side as a sheet
+
+   A phone has no room for a column beside the stage, so under the narrow
+   media query the sidebar sits off the bottom of the screen until asked for.
+   On a wide screen it is always in view and this toggle changes nothing. */
+let sideOpen = false;
+const narrow = () => window.matchMedia('(max-width: 860px)').matches;
+
+function setSide(open) {
+  sideOpen = !!open;
+  document.body.classList.toggle('side-open', sideOpen);
+  $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
+  $('#panelBtn').classList.toggle('on', sideOpen);
+  syncSideBtn();
+}
+
+/* With the controls behind a button, nothing would otherwise point at them
+   after you pick something up, so the button lights while the sheet is shut. */
+function syncSideBtn() {
+  const btn = $('#panelBtn');
+  if (btn) btn.classList.toggle('hot', !sideOpen && !!findSel());
 }
 
 const mm = pt => (pt / PT).toFixed(1);
@@ -1782,6 +1846,8 @@ function init() {
   $('#openZine').addEventListener('click', () => $('#zineFile').click());
   $('#saveZine').addEventListener('click', saveZine);
   $('#helpBtn').addEventListener('click', () => setHelp(!helpOpen));
+  $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
+  $('#sideClose').addEventListener('click', () => setSide(false));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
     e.target.value = '';
@@ -1814,7 +1880,9 @@ function init() {
     }
   });
   document.addEventListener('keydown', onKey);
-  window.addEventListener('resize', fitZoom);
+  // The thumbnails size themselves to the layout, so a resize may cross the
+  // breakpoint and need them redrawn, not just the zoom recomputed.
+  window.addEventListener('resize', () => { fitZoom(); paintStripSoon(); });
 
   const stage = $('#stage');
   let dragDepth = 0;

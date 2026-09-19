@@ -47,10 +47,14 @@ than reimplementing it.
 | `editor.test.js` | elements, spread selection, synthesised drag/rotate gestures, templates, undo |
 | `print.test.js` | imposition, margins and guides, measured off the 300 dpi raster |
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
+| `mobile.test.js` | the phone layout, measured on an emulated handset |
 | `pages.test.js` | the site served over HTTP from a project subpath |
 
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
-so a test that skips it will inherit the previous one's document.
+so a test that skips it will inherit the previous one's document. The same goes for
+the viewport: `page.emulate(w, h)` puts the shared window into a handset — size,
+pixel ratio and a touch screen, so `pointer: coarse` resolves — and whoever calls it
+owes a `page.unemulate()` in their teardown.
 
 Two habits worth keeping. **Measure, do not eyeball** — panel seams, rim clipping and
 PDF offsets have all been wrong at some point, and only pixel or byte measurement
@@ -142,6 +146,32 @@ Two invariants worth knowing before touching it:
 - Selection may live in either half of a spread, so look elements up with
   `findSel()` / `elById()` rather than assuming `state.active`. Mutating actions use
   `selPanel()`, not `panel()`.
+
+### Small screens
+
+One breakpoint, `max-width: 860px`, and `narrow()` in `app.js` reads the same query
+so the script and the stylesheet cannot disagree. Under it the sidebar stops being a
+column and becomes a sheet that slides up over the stage, toggled by `#panelBtn` and
+`setSide()`; `body.side-open` is the only state. **Never hide the inspector on a
+phone** — it is the only place most controls exist, which is what the earlier
+breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
+
+Touch is not just a narrower mouse:
+
+- `.sheet .el { touch-action: none }` — without it the browser claims the drag for
+  scrolling and the element never moves. Bare panel keeps the default, so a drag on
+  empty paper still scrolls the stage.
+- Cancelling that drag cancels the synthesised `dblclick` with it, so
+  `doubleTapped()` recognises a double tap on text for `pointerType` touch and pen.
+  The mouse, and the test suite's own gestures, keep the real `dblclick`.
+- `@media (pointer: coarse)` grows the hit areas, the selection handles included —
+  they counter-scale with `--iz`, so those sizes are screen pixels.
+- Form controls go to 16px on a narrow screen, below which iOS zooms the whole page
+  in when one takes focus.
+
+`fitZoom()` measures the strip, the labels and the stage padding rather than
+assuming a desktop window, and `paintStrip()` calls it once the thumbnails exist,
+since their height is part of the sheet's budget.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.

@@ -173,6 +173,21 @@ async function openApp(url) {
       }
       throw new Error('the page did not come back after reloading');
     },
+    /* Pretends to be a phone: viewport size, pixel ratio and a touch screen,
+       so the media queries and `pointer: coarse` resolve the way they do on
+       one. Suites that call this must put it back in their teardown. */
+    async emulate(w, h) {
+      await send('Emulation.setDeviceMetricsOverride', {
+        width: w, height: h, deviceScaleFactor: 2, mobile: true
+      });
+      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await sleep(60);            // let the resize handler settle before measuring
+    },
+    async unemulate() {
+      await send('Emulation.clearDeviceMetricsOverride');
+      await send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await sleep(60);
+    },
     async screenshot(file) {
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(file, Buffer.from(shot.result.data, 'base64'));

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Zine Maker</title>
 <!-- Inline so a hosted copy needs no extra file, and browsers stop asking
      the origin root for a favicon.ico that is not there. -->
@@ -51,8 +51,12 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
+  /* Mobile browsers shrink the visual viewport as the URL bar slides away, so
+     prefer the dynamic unit where it exists and keep 100% as the fallback. */
+  @supports (height: 100dvh) { html, body { height: 100dvh; } }
   body {
     background: var(--bg);
+    touch-action: manipulation;          /* no double-tap zoom on the chrome */
     color: var(--fg);
     font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
     display: grid;
@@ -192,6 +196,10 @@
   .band-r { right: 0; top: 0; bottom: 0; border-left: calc(1px * var(--iz)) dashed rgba(255,79,109,.85); }
 
   /* ---------- selection chrome ---------- */
+  /* A finger on an element drags the element; the browser must not claim the
+     gesture for scrolling first. Bare panel keeps its default, so a drag on
+     empty paper still scrolls the stage. */
+  .sheet .el { touch-action: none; }
   .el.sel { outline: calc(1.5px * var(--iz)) solid var(--accent2); }
   .el .ui { display: none; }
   .el.sel .ui { display: block; }
@@ -323,9 +331,93 @@
   }
   button.ghost.on { background: #26262f; border-color: var(--accent2); color: #fff; }
 
+  /* ---------- sidebar as a sheet ---------- */
+  /* Hidden off the bottom until the toolbar asks for it; only the narrow
+     layout below ever leaves it there. */
+  .side-bar { display: none; }
+  #panelBtn { display: none; }
+  #panelBtn.hot { border-color: var(--accent2); color: #fff; }
+
+  /* ---------- touch ---------- */
+  /* Sized by the finger rather than the pointer, on any touch screen. */
+  @media (pointer: coarse) {
+    button, select, input[type="text"], input[type="number"] { padding: 9px 12px; }
+    .icon { padding: 8px 10px; min-width: 38px; }
+    .icon svg { width: 18px; height: 18px; }
+    .menu button { padding: 10px 12px; }
+    input[type="color"] { width: 40px; height: 34px; }
+    input[type="range"] { height: 30px; }
+    .num { width: 68px; }
+    .sheet-labels i { padding: 6px 14px; font-size: 11px; }
+    .thumb { padding: 2px; }
+    /* Handles counter-scale, so these are screen pixels under the fingertip. */
+    .el .h { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
+    .el .h.rot { margin-top: calc(-28px * var(--iz)); }
+    .el .stem { height: calc(28px * var(--iz)); margin-top: calc(-28px * var(--iz)); }
+  }
+
+  /* ---------- small screens ---------- */
+  /* Every control lives in the inspector, so it cannot simply disappear on a
+     phone: it becomes a sheet that slides up over the stage. */
   @media (max-width: 860px) {
     body { grid-template-columns: 1fr; grid-template-areas: "bar" "stage"; }
-    .side, #helpBtn { display: none; }
+    /* The stage is the scarce thing here, so the toolbar sheds everything it
+       can — the logo, the dividers, the words on the buttons — and wraps the
+       rest itself rather than being told where to break. */
+    .bar { gap: 4px; padding: 7px 8px; padding-top: max(7px, env(safe-area-inset-top)); }
+    .logo, .sep { display: none; }
+    .btn-label { display: none; }
+    .icon { padding: 8px; }
+    /* A glyph button is otherwise as narrow as its glyph, nothing like a
+       fingertip. */
+    .bar button { min-width: 36px; }
+    #title { flex: 1 1 60px; min-width: 0; max-width: none; padding: 8px; }
+    .spacer { display: none; }
+    /* Paper size rides down to the second row with the export button, which
+       leaves the first one to the title and the things you add. */
+    #paper { order: 1; padding: 9px 4px; }
+    .split { order: 2; }
+    #panelBtn { display: inline-block; }
+
+    .stage { padding: 10px 10px 2px; }
+    .strip {
+      flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+      justify-content: flex-start; gap: 6px; padding: 8px 2px 4px;
+      scrollbar-width: none;
+    }
+    .strip::-webkit-scrollbar { display: none; }
+    /* Auto margins centre the eight while they fit and collapse to nothing
+       once they do not, which keeps the first one reachable when it scrolls. */
+    .thumb { flex: none; }
+    .thumb:first-child { margin-left: auto; }
+    .thumb:last-child { margin-right: auto; }
+
+    .side {
+      position: fixed; z-index: 70; left: 0; right: 0; bottom: 0;
+      max-height: min(62vh, 440px);
+      border-left: none; border-top: 1px solid var(--line);
+      border-radius: 14px 14px 0 0;
+      box-shadow: 0 -14px 34px rgba(0, 0, 0, .5);
+      padding: 0 14px calc(14px + env(safe-area-inset-bottom));
+      overscroll-behavior: contain;
+      visibility: hidden;
+      transform: translateY(calc(100% + 40px));
+      transition: transform .2s ease, visibility .2s;
+    }
+    body.side-open .side { visibility: visible; transform: none; }
+    .side-bar {
+      display: flex; justify-content: flex-end; align-items: center;
+      position: sticky; top: 0; z-index: 1;
+      background: var(--bg2); padding: 9px 0 8px; margin-bottom: 2px;
+    }
+    /* Sticky counts as positioned, so the grip centres on the bar itself. */
+    .side-bar .grab {
+      position: absolute; left: 50%; top: 50%; margin: -2px 0 0 -23px;
+      width: 46px; height: 4px; border-radius: 2px; background: var(--line);
+    }
+    /* 16px or smaller, and iOS zooms the whole page in on focus. */
+    input[type="text"], input[type="number"], select, #title { font-size: 16px; }
+    .toast { bottom: calc(18px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
@@ -372,7 +464,15 @@
     <option value="letter">US Letter</option>
   </select>
   <div class="spacer"></div>
-  <button id="helpBtn" class="ghost" aria-pressed="false" title="Show or hide help">? Help</button>
+  <button id="panelBtn" class="icon ghost" aria-expanded="false" aria-controls="side" title="Show or hide the settings panel" aria-label="Show or hide the settings panel">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <path d="M1.5 4.5h13M1.5 8h13M1.5 11.5h13"/>
+      <circle cx="5.5" cy="4.5" r="1.6" fill="var(--bg2)"/>
+      <circle cx="10.5" cy="8" r="1.6" fill="var(--bg2)"/>
+      <circle cx="4.5" cy="11.5" r="1.6" fill="var(--bg2)"/>
+    </svg>
+  </button>
+  <button id="helpBtn" class="ghost" aria-pressed="false" title="Show or hide help">?<span class="btn-label"> Help</span></button>
   <button id="openZine" class="icon ghost" title="Open a .zine file" aria-label="Open a .zine file">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
       <path d="M2 5.2V3.6a1 1 0 0 1 1-1h2.9l1.2 1.4H13a1 1 0 0 1 1 1V6"/>
@@ -388,7 +488,7 @@
   </button>
   <div class="sep"></div>
   <div class="split">
-    <button id="exportPdf" class="primary">Export PDF</button>
+    <button id="exportPdf" class="primary"><span class="btn-label">Export </span>PDF</button>
     <button id="exportMenuBtn" class="primary icon split-arrow" aria-haspopup="true" aria-expanded="false" title="More export options" aria-label="More export options">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
     </button>
@@ -410,7 +510,14 @@
   <div class="drop-hint">drop images here</div>
 </div>
 
-<aside class="side">
+<aside class="side" id="side">
+  <!-- Grip and close button for when this is a sheet over the stage. -->
+  <div class="side-bar">
+    <span class="grab" aria-hidden="true"></span>
+    <button id="sideClose" class="icon ghost" title="Close the settings panel" aria-label="Close the settings panel">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
   <!-- Explanatory text lives here, hidden until the Help button is pressed. -->
   <div id="help" class="help" hidden></div>
   <div id="inspector"></div>
