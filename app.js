@@ -353,10 +353,18 @@ const TEMPLATES = [
     { t: 'text', x: .08, y: .63, w: .84, size: .13, lh: .98, font: 3, align: 'left', text: 'TITLE' },
     { t: 'text', x: .08, y: .88, w: .84, size: .042, font: 2, align: 'left', text: 'issue one' }
   ] },
+  { n: 'Poster cover', slots: [
+    { t: 'image', x: .08, y: .02, w: .85, h: .86 },
+    { t: 'text', x: .11, y: .33, w: .8, size: .21, lh: .95, font: 1, align: 'left',
+      rot: -9, color: '#ffffff', text: 'TITLE' }
+  ] },
   { n: 'Full bleed', slots: [
     { t: 'image', x: 0, y: 0, w: 1, h: 1 },
     { t: 'text', x: .06, y: .84, w: .88, size: .045, font: 0, align: 'left',
       bg: '#ffffff', text: 'caption' }
+  ] },
+  { n: 'Framed photo', slots: [
+    { t: 'image', x: .08, y: .06, w: .84, h: .79 }
   ] },
   { n: 'Photo, text', slots: [
     { t: 'image', x: .08, y: .08, w: .84, h: .42 },
@@ -402,6 +410,12 @@ const TEMPLATES = [
     { t: 'qr', x: .3, y: .34, w: .4 },
     { t: 'text', x: .1, y: .76, w: .8, size: .034, lh: 1.4, font: 2, align: 'center',
       text: 'made on a photocopier' }
+  ] },
+  { n: 'Back, photo + QR', slots: [
+    { t: 'image', x: .04, y: .02, w: .94, h: .88 },
+    { t: 'qr', x: .06, y: .77, w: .16 },
+    { t: 'text', x: .13, y: .9, w: .76, size: .06, font: 7, align: 'center', lh: 1.35,
+      text: 'caption' }
   ] }
 ];
 
@@ -412,7 +426,7 @@ function slotDefault(s) {
              light: '#ffffff', quiet: 4, opacity: 1 };
   }
   return { id: uid(), type: 'text', x: 0, y: 0, w: 10, rot: 0,
-           text: s.text || 'text', font: 0, size: 12, color: '#111111',
+           text: s.text || 'text', font: 0, size: 12, color: s.color || '#111111',
            align: 'left', lh: 1.35, ls: 0, bold: false, italic: false,
            bg: '', pad: 4 };
 }
@@ -445,6 +459,7 @@ function applyTemplate(tpl) {
       if (s.align) el.align = s.align;
       if (s.font != null) el.font = s.font;
       if (s.lh) el.lh = s.lh;
+      if (s.color) el.color = s.color;
       el.italic = !!s.italic;
       el.bg = s.bg || '';
     }
