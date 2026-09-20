@@ -147,6 +147,7 @@ async function openApp(url) {
         window.confirm = () => true;
         state.paper = 'a4'; state.margin = 5;
         state.cut = true; state.guides = false;
+        state.singleView = false;
         state.title = 'test zine'; state.active = 0;
         state.docs = { mini: blankDoc(8) };
         selId = null; editingId = null;
