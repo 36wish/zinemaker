@@ -146,7 +146,7 @@ async function openApp(url) {
         try { localStorage.clear(); } catch (e) {}
         window.confirm = () => true;
         state.paper = 'a4'; state.margin = 5;
-        state.cut = true; state.guides = false;
+        state.cut = true; state.guides = false; state.trimMargin = false;
         state.singleView = false;
         state.title = 'test zine'; state.active = 0;
         state.docs = { mini: blankDoc(8) };

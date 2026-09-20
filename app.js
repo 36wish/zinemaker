@@ -63,6 +63,7 @@ const blankDoc = n => ({ panels: Array.from({ length: n }, blankPanel) });
 let state = {
   v: 1, paper: 'a4', title: 'untitled zine', active: 0,
   margin: 5,                        // mm of unprintable edge to stay clear of
+  trimMargin: false,                // trim that edge off after printing, for an edge-to-edge zine
   cut: true,                        // print a guide along the slit
   guides: false,                    // print dotted panel outlines
   singleView: false,                // phone only: one panel on screen instead of the spread
@@ -79,8 +80,10 @@ const clampMargin = m => Math.min(25, Math.max(0, isFinite(m) ? m : 0));
    Which edges those are depends on where the panel sits in the imposition and
    which way up it prints — the top row is upside down, so the sheet's top edge
    is that panel's *bottom*. Returns millimetres in the panel's own
-   orientation, or null when there is no margin. */
+   orientation, or null when there is no margin — or when trimming before
+   folding, since then the panel grid is already inset clear of the rim. */
 function unsafeEdges(pi) {
+  if (state.trimMargin) return null;
   const m = clampMargin(state.margin);
   if (!m) return null;
   const c = IMPOSE[pi];
@@ -125,10 +128,21 @@ function findSel() {
 const selected = () => { const f = findSel(); return f ? f.el : null; };
 const selPanel = () => { const f = findSel(); return f ? doc().panels[f.pi] : panel(); };
 
+/* Trimming before folding removes the margin from the sheet first, so the
+   panel grid itself has to shrink and shift inward to match — otherwise the
+   folds, made on the smaller trimmed paper, would land off the artwork.
+   Leaving the border keeps panels at a full quarter/half of the sheet, as
+   before, with offsetX/Y at zero. */
 function geom() {
   const p = PAPER[state.paper];
   const sw = p.h * PT, sh = p.w * PT;           // landscape sheet
-  return { sheetW: sw, sheetH: sh, panelW: sw / 4, panelH: sh / 2, count: 8 };
+  const m = (state.trimMargin ? clampMargin(state.margin) : 0) * PT;
+  return {
+    sheetW: sw, sheetH: sh,
+    panelW: (sw - 2 * m) / 4, panelH: (sh - 2 * m) / 2,
+    offsetX: m, offsetY: m,
+    count: 8
+  };
 }
 
 /* -------------------------------------------------------------- persistence */
@@ -158,6 +172,7 @@ function load() {
       title: typeof s.title === 'string' ? s.title : 'untitled zine',
       active: 0,
       margin: clampMargin(s.margin == null ? 5 : s.margin),
+      trimMargin: !!s.trimMargin,
       cut: s.cut !== false,
       guides: !!s.guides,
       singleView: !!s.singleView,
@@ -975,28 +990,44 @@ function opts(list, cur, val, name) {
 
 function foldDiagram() {
   const cw = 60, ch = 42, x0 = 4, y0 = 12;
+  const g = geom(), mmv = clampMargin(state.margin);
+  const bx = mmv / (g.sheetW / PT) * cw * 4, by = mmv / (g.sheetH / PT) * ch * 2;
+  const trimOn = state.trimMargin && mmv > 0;
+
+  /* Leaving the border: panels stay full size and a dashed boundary shows the
+     safe area eating into the outer ones. Trimming before folding: the panels
+     are already inset by that same amount, so draw them smaller and shifted
+     in, with the untrimmed sheet as an outer reference rectangle. */
+  const gx = trimOn ? bx : 0, gy = trimOn ? by : 0;
+  const cw2 = trimOn ? (cw * 4 - bx * 2) / 4 : cw;
+  const ch2 = trimOn ? (ch * 2 - by * 2) / 2 : ch;
+
   let cells = '';
   IMPOSE.forEach((c, i) => {
-    const x = x0 + c.col * cw, y = y0 + c.row * ch;
-    const tx = x + cw / 2, ty = y + ch / 2 + 3;
-    cells += '<rect x="' + x + '" y="' + y + '" width="' + cw + '" height="' + ch + '"/>' +
+    const x = x0 + gx + c.col * cw2, y = y0 + gy + c.row * ch2;
+    const tx = x + cw2 / 2, ty = y + ch2 / 2 + 3;
+    cells += '<rect x="' + x + '" y="' + y + '" width="' + cw2 + '" height="' + ch2 + '"/>' +
       '<text x="' + tx + '" y="' + ty + '" text-anchor="middle"' +
       (c.rot ? ' transform="rotate(180 ' + tx + ' ' + (ty - 3) + ')"' : '') + '>' +
       (i + 1) + '</text>';
   });
-  /* The printable boundary sits inside the sheet, eating into the outer
-     panels — the sheet itself stays exactly four panels by two. */
-  const g = geom(), mmv = clampMargin(state.margin);
-  const bx = mmv / (g.sheetW / PT) * cw * 4, by = mmv / (g.sheetH / PT) * ch * 2;
-  const band = mmv > 0
+
+  const outline = trimOn
+    ? '<rect x="' + x0 + '" y="' + y0 + '" width="' + (cw * 4) + '" height="' + (ch * 2) + '"/>'
+    : '';
+  const band = (!trimOn && mmv > 0)
     ? '<rect class="band" x="' + (x0 + bx) + '" y="' + (y0 + by) + '" width="' +
       (cw * 4 - bx * 2) + '" height="' + (ch * 2 - by * 2) + '"/>'
     : '';
+  const cutY = y0 + gy + ch2;
   return '<svg class="fold" viewBox="0 0 ' + (cw * 4 + 8) + ' ' + (ch * 2 + 26) + '">' +
-    '<text x="4" y="8">print one side, landscape</text>' + cells + band +
-    '<line class="cut" x1="' + (x0 + cw) + '" y1="' + (y0 + ch) + '" x2="' + (x0 + cw * 3) + '" y2="' + (y0 + ch) + '"/>' +
+    '<text x="4" y="8">print one side, landscape</text>' + outline + cells + band +
+    '<line class="cut" x1="' + (x0 + gx + cw2) + '" y1="' + cutY + '" x2="' + (x0 + gx + cw2 * 3) + '" y2="' + cutY + '"/>' +
     '<text x="4" y="' + (y0 + ch * 2 + 12) + '">red line = cut the slit' +
-    (mmv > 0 ? ', dashed = printable area' : '') + '</text></svg>';
+    (mmv > 0
+      ? (trimOn ? ', outer box = trim before folding' : ', dashed = printable area')
+      : '') +
+    '</text></svg>';
 }
 
 /* On a phone the settings button means the whole project, full stop, so the
@@ -1144,6 +1175,15 @@ function inspectorForPage() {
         '<input type="range" min="0" max="20" step="0.5" data-margin value="' + state.margin + '"></div>' +
         '<div><input class="num" type="number" min="0" max="25" step="0.5" data-margin value="' +
         state.margin + '"></div><span class="hint">mm</span></div></div>' +
+      '<div class="row">' +
+        '<label class="f" style="margin:0;flex:1">After printing</label>' +
+        '<div class="seg"><button data-trim="0"' + on(!state.trimMargin) + '>Leave border</button>' +
+        '<button data-trim="1"' + on(state.trimMargin) + '>Trim it off</button></div></div>' +
+      (state.trimMargin && state.margin > 0
+        ? '<div class="hint">A cut line prints ' + state.margin + ' mm in from the sheet ' +
+          'edge &mdash; cut along it before folding.</div>'
+        : '') +
+    '</div>' +
 
     '<div class="grp"><h2>Print guides</h2>' +
       '<div class="row">' +
@@ -1194,20 +1234,31 @@ function helpHtml() {
     '<p>' + marginNote() + '</p>' +
 
     '<h3>Folding</h3>' + foldDiagram() +
-    '<p>Print the exported PDF on one side of a single sheet. Fold in half the ' +
-      'long way, then in half twice more. Unfold to the long half-fold, cut the ' +
-      'slit, then push the ends together and fold into a booklet.</p>' +
-    '<p>No trimming is needed: every fold lands on the middle of the paper, which ' +
-      'is exactly where the panel edges are.</p>' +
+    (state.trimMargin && state.margin > 0
+      ? '<p>Print the exported PDF on one side of a single sheet. Before folding ' +
+        'anything, trim ' + state.margin + ' mm off all four edges with a paper cutter, ' +
+        'following the line printed near the edge &mdash; that strip was always blank, ' +
+        'the printer cannot reach it, so cutting it away first just removes the border.</p>' +
+        '<p>Then fold the trimmed sheet in half the long way, then in half twice more. ' +
+        'Unfold to the long half-fold, cut the slit, then push the ends together and ' +
+        'fold into a booklet. The panel grid was inset by the same amount, so the folds ' +
+        'still land exactly on the panel edges, and the finished zine reads edge to edge.</p>'
+      : '<p>Print the exported PDF on one side of a single sheet. Fold in half the ' +
+        'long way, then in half twice more. Unfold to the long half-fold, cut the ' +
+        'slit, then push the ends together and fold into a booklet.</p>' +
+        '<p>No trimming is needed: every fold lands on the middle of the paper, which ' +
+        'is exactly where the panel edges are.</p>') +
 
     '<h3>Print guides</h3>' +
     '<p>' +
       (state.guides ? 'Dotted lines mark every panel edge. ' : '') +
       (state.cut ? 'A solid line marks the slit. ' : '') +
-      (state.guides || state.cut
-        ? 'Both fall on creases &mdash; the outlines are the folds, and the ' +
-          'scissors go through the cut line &mdash; so a tidy fold hides them.'
-        : 'Both are off, so nothing is printed over the artwork; use the diagram above.') +
+      (state.trimMargin && state.margin > 0 ? 'A solid line near the sheet edge marks the trim. ' : '') +
+      (state.guides || state.cut || (state.trimMargin && state.margin > 0)
+        ? 'These fall on creases or cuts you are making anyway &mdash; the outlines are ' +
+          'the folds, the middle line is the slit, and the outer one is the trim &mdash; ' +
+          'so a tidy fold and cut hides them.'
+        : 'All are off, so nothing is printed over the artwork; use the diagram above.') +
     '</p>' +
 
     '<h3>Files</h3>' +
@@ -1392,7 +1443,24 @@ function fitBar() {
 const mm = pt => (pt / PT).toFixed(1);
 
 function marginNote() {
-  const g = geom(), e = unsafeEdges(state.active);
+  const g = geom();
+  if (state.trimMargin) {
+    if (state.margin <= 0) {
+      return 'No margin, so there is nothing to trim. The design runs right to the ' +
+             'paper edge &mdash; fine for a borderless printer, otherwise your printer ' +
+             'will crop it for you.';
+    }
+    return 'With &ldquo;Trim it off&rdquo; on, the panel grid is inset ' + state.margin +
+      ' mm from every edge of the <b>sheet</b>, so no panel ever reaches into the strip ' +
+      'most printers cannot reach &mdash; nothing here is clipped. Panels are ' +
+      mm(g.panelW) + ' × ' + mm(g.panelH) + ' mm, a touch smaller than a full quarter of ' +
+      'the sheet, to leave room for the cut.<br><br>Cut that ' + state.margin + ' mm strip ' +
+      'off all four edges of the printed sheet &mdash; the line near the edge shows where ' +
+      '&mdash; <b>before</b> you fold. The folds then land exactly on the panel edges, same ' +
+      'as always, and the finished zine reads edge to edge.' +
+      '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
+  }
+  const e = unsafeEdges(state.active);
   if (!e) {
     return 'No margin. The design runs right to the paper edge &mdash; fine for a ' +
            'borderless printer, otherwise your printer will crop it for you.';
@@ -1413,7 +1481,9 @@ function marginNote() {
       ? where + sides.join(' and ') + ' edge' + (sides.length > 1 ? 's are' : ' is') +
         ' clipped, leaving ' + safeW.toFixed(1) + ' × ' + safeH.toFixed(1) + ' mm to work in.'
       : 'This panel is in the middle of the sheet, so none of it is clipped.') +
-    '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
+    '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.' +
+    ' Turn on &ldquo;Trim it off&rdquo; below if you plan to cut this border away ' +
+    'before folding, for an edge-to-edge result.';
 }
 
 /* Shared between #inspector and, on a phone, #elemInspector — each only
@@ -1467,6 +1537,14 @@ function wireInspector(side) {
     }));
   });
 
+  /* Trimming changes geom() itself (panel size and the on-screen chop bands
+     both depend on it), so the sheet needs a real repaint, not just the
+     inspector text. */
+  side.querySelectorAll('[data-trim]').forEach(b => b.addEventListener('click', () => {
+    state.trimMargin = b.getAttribute('data-trim') === '1';
+    paintAll(); save();
+  }));
+
   /* Print settings sit outside the undo stack, which only snapshots state.docs. */
   side.querySelectorAll('[data-margin]').forEach(node => {
     const apply = () => {
@@ -1506,7 +1584,9 @@ function newZine() {
   if (!confirm('Delete this whole zine and start a new one?')) return;
   pushHistory();
   state.docs = { mini: blankDoc(8) };
+  state.title = 'untitled zine';
   state.active = 0; selId = null;
+  $('#title').value = state.title;
   paintAll(); save();
 }
 
@@ -1562,9 +1642,11 @@ function buildSheetNode() {
   root.style.cssText = 'position:relative;overflow:hidden;background:#ffffff;width:' +
                        g.sheetW + 'px;height:' + g.sheetH + 'px';
 
-  /* Panels stay exactly a quarter of the sheet wide and half of it tall, so
-     every fold lands on a panel edge. The margin is painted over the finished
-     sheet as bare paper, which is what the printer leaves there anyway. */
+  /* Panels stay exactly a quarter of the sheet wide and half of it tall (or,
+     when trimming before folding, a quarter/half of the trimmed area, inset
+     by the margin), so every fold lands on a panel edge either way. The
+     margin is painted over the finished sheet as bare paper, which is what
+     the printer leaves there anyway. */
   const block = document.createElement('div');
   block.style.cssText = 'position:absolute;left:0;top:0;width:' + g.sheetW +
                         'px;height:' + g.sheetH + 'px';
@@ -1576,38 +1658,55 @@ function buildSheetNode() {
     const p = doc().panels[c.i];
     const pn = document.createElement('div');
     pn.className = 'panel';
-    pn.style.cssText = 'position:absolute;left:' + (c.col * g.panelW) + 'px;top:' +
-      (c.row * g.panelH) + 'px;width:' + g.panelW + 'px;height:' + g.panelH +
+    pn.style.cssText = 'position:absolute;left:' + (g.offsetX + c.col * g.panelW) + 'px;top:' +
+      (g.offsetY + c.row * g.panelH) + 'px;width:' + g.panelW + 'px;height:' + g.panelH +
       'px;background:' + p.bg + ';transform:rotate(' + c.rot + 'deg)';
     p.els.forEach(el => pn.appendChild(makeNode(el, false)));
     block.appendChild(pn);
   });
 
   /* Print guides, drawn over the artwork so they read whatever is underneath.
-     Both land on creases: the panel outlines are exactly the fold lines, and
+     All land on creases: the panel outlines are exactly the fold lines, and
      the scissors go straight through the cut line, so a clean fold and cut
-     leaves neither of them showing on the finished zine. */
+     leaves neither of them showing on the finished zine. offsetX/Y is zero
+     unless trimming before folding, so this is the same math either way. */
+  const m = clampMargin(state.margin) * PT;
+
   if (state.guides || state.cut) {
     const svg = guideOverlay(g);
     if (state.guides) {
       for (let c = 1; c < 4; c++) {
-        guideStroke(svg, g.panelW * c, 0, g.panelW * c, g.sheetH, 1.2, 2.4, '#b4b4b4');
+        const x = g.offsetX + g.panelW * c;
+        guideStroke(svg, x, g.offsetY, x, g.sheetH - g.offsetY, 1.2, 2.4, '#b4b4b4');
       }
-      guideStroke(svg, 0, g.sheetH / 2, g.sheetW, g.sheetH / 2, 1.2, 2.4, '#b4b4b4');
+      const midY = g.offsetY + g.panelH;
+      guideStroke(svg, g.offsetX, midY, g.sheetW - g.offsetX, midY, 1.2, 2.4, '#b4b4b4');
     }
     if (state.cut) {
-      guideStroke(svg, g.sheetW / 4, g.sheetH / 2, g.sheetW * 3 / 4, g.sheetH / 2,
+      const midY = g.offsetY + g.panelH;
+      guideStroke(svg, g.offsetX + g.panelW, midY, g.offsetX + g.panelW * 3, midY,
                   0, 0, '#6e6e6e', '1');
     }
     root.appendChild(svg);
   }
 
-  const m = clampMargin(state.margin) * PT;
   if (m > 0) {
     const rim = document.createElement('div');
     rim.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;' +
       'box-sizing:border-box;border:' + m + 'px solid #ffffff';
     root.appendChild(rim);
+  }
+
+  /* Trimming before folding: the panel grid above is already inset by m, so
+     this line runs right along its outer edge — cut along it first, then
+     fold the smaller sheet exactly as usual. */
+  if (state.trimMargin && m > 0) {
+    const trim = guideOverlay(g);
+    guideStroke(trim, m, m, g.sheetW - m, m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, m, g.sheetH - m, g.sheetW - m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, m, m, m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    guideStroke(trim, g.sheetW - m, m, g.sheetW - m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
+    root.appendChild(trim);
   }
   return root;
 }
@@ -1727,7 +1826,7 @@ function download(blob, name) {
 
    { "format": "zine", "formatVersion": 2, "app": "zinemaker",
      "saved": <ISO 8601>, "title": string,
-     "paper": "a4"|"letter", "margin": <mm>,
+     "paper": "a4"|"letter", "margin": <mm>, "trimMargin": bool,
      "cut": bool, "guides": bool,
      "assets": [ { "type": <mime>, "bytes": <length> }, ... ],
      "docs": { "mini": { "panels": [ 8 ] } } }
@@ -1797,7 +1896,7 @@ async function saveZine() {
     format: 'zine', formatVersion: ZINE_FORMAT, app: 'zinemaker',
     saved: new Date().toISOString(),
     title: state.title, paper: state.paper,
-    margin: state.margin, cut: state.cut, guides: state.guides,
+    margin: state.margin, trimMargin: state.trimMargin, cut: state.cut, guides: state.guides,
     assets: assets.map(a => ({ type: a.type, bytes: a.bytes.length })),
     docs: docs
   };
@@ -1891,6 +1990,7 @@ async function openZine(file) {
   state.title = typeof data.title === 'string' ? data.title : 'untitled zine';
   state.paper = PAPER[data.paper] ? data.paper : 'a4';
   state.margin = clampMargin(data.margin == null ? 5 : data.margin);
+  state.trimMargin = !!data.trimMargin;
   state.cut = data.cut !== false;
   state.guides = !!data.guides;
   state.docs = { mini: fixDoc(data.docs.mini, 8) };

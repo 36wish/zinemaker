@@ -78,6 +78,53 @@ module.exports = {
       assert.eq(any, false);
     });
 
+    t.check('trimming before folding reports no clipped edges either', async () => {
+      await page.reset({ margin: 5, trimMargin: true });
+      const any = await page.evaluate('state.docs.mini.panels.some((_, i) => unsafeEdges(i) !== null)');
+      assert.eq(any, false, 'panels are already inset, so none of them should read as clipped');
+    });
+
+    t.check('trimming before folding shrinks and insets the panel grid by the margin', async () => {
+      await page.reset({ margin: 5, trimMargin: true });
+      const g = await page.evaluate('(() => { const g = geom(); return ' +
+        '{ sheetW: g.sheetW, sheetH: g.sheetH, panelW: g.panelW, panelH: g.panelH, ' +
+        'offsetX: g.offsetX, offsetY: g.offsetY, mPt: 5 * PT }; })()');
+      assert.near(g.offsetX, g.mPt, 1e-6, 'the grid is offset by the margin horizontally');
+      assert.near(g.offsetY, g.mPt, 1e-6, 'the grid is offset by the margin vertically');
+      assert.near(g.panelW, (g.sheetW - 2 * g.mPt) / 4, 1e-6, 'panel width shrinks to a quarter of the trimmed sheet');
+      assert.near(g.panelH, (g.sheetH - 2 * g.mPt) / 2, 1e-6, 'panel height shrinks to half of the trimmed sheet');
+    });
+
+    t.check('trimming before folding keeps panels aligned to the trimmed quarter and half lines', async () => {
+      await page.reset({ margin: 5, trimMargin: true, cut: false, guides: false });
+      const r = await page.evaluate(`(async () => {
+        const greys = [16, 48, 80, 112, 144, 176, 208, 232];
+        state.docs.mini.panels.forEach((p, i) => {
+          p.bg = 'rgb(' + greys[i] + ',' + greys[i] + ',' + greys[i] + ')';
+          p.els = [];
+        });
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
+        const ctx = cv.getContext('2d');
+        const ptToPx = 300 / 72;
+        const at = (xPt, yPt) => ctx.getImageData(Math.round(xPt * ptToPx), Math.round(yPt * ptToPx), 1, 1).data[0];
+        // The bottom row (row 1) prints upright: columns 0..3 are panels 6, 7, back, cover.
+        const yMid = g.offsetY + g.panelH * 1.5;
+        const colMid = c => g.offsetX + g.panelW * (c + 0.5);
+        return {
+          margin: at(2, yMid),
+          col0: at(colMid(0), yMid), col1: at(colMid(1), yMid),
+          col2: at(colMid(2), yMid), col3: at(colMid(3), yMid)
+        };
+      })()`);
+      assert.eq(r.margin, 255, 'the inset band should still be blank white, not panel colour');
+      // panels 6, 7, back, cover are indices 5, 6, 7, 0
+      assert.eq(r.col0, 176, 'column 0 should show panel 6');
+      assert.eq(r.col1, 208, 'column 1 should show panel 7');
+      assert.eq(r.col2, 232, 'column 2 should show the back panel');
+      assert.eq(r.col3, 16, 'column 3 should show the cover');
+    });
+
     t.check('full-bleed artwork is clipped at exactly the margin, all four sides', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(async () => {
@@ -251,6 +298,59 @@ module.exports = {
       assert.eq(ink, 0, 'a blank zine with no guides should render as blank paper');
     });
 
+    t.check('the trim line is absent unless "Trim it off" is switched on', async () => {
+      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: false });
+      const ink = await page.evaluate(`(async () => {
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 150 / 72);
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] < 245) n++;
+        return n;
+      })()`);
+      assert.eq(ink, 0, 'no trim line should print with the option off');
+    });
+
+    t.check('the trim line prints a rectangle inset by the margin when switched on', async () => {
+      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: true });
+      const r = await page.evaluate(`(async () => {
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const perMm = (300 / 72) * (72 / 25.4);
+        // Project ink onto each axis rather than sampling one row or column,
+        // since a stroke only inks the middle stretch of each side.
+        const colInk = new Array(cv.width).fill(0);
+        const rowInk = new Array(cv.height).fill(0);
+        for (let y = 0; y < cv.height; y++) {
+          for (let x = 0; x < cv.width; x++) {
+            if (d[((y * cv.width) + x) * 4] < 230) { colInk[x]++; rowInk[y]++; }
+          }
+        }
+        const groups = (counts, floor, per) => {
+          const hits = [];
+          counts.forEach((n, i) => { if (n > floor) hits.push(i); });
+          const out = [];
+          hits.forEach(i => {
+            if (out.length && i - out[out.length - 1].last <= 3) {
+              out[out.length - 1].last = i;
+            } else out.push({ first: i, last: i });
+          });
+          return out.map(b => +(((b.first + b.last) / 2) / per).toFixed(2));
+        };
+        return {
+          verticals: groups(colInk, cv.height * 0.3, perMm),
+          horizontals: groups(rowInk, cv.width * 0.3, perMm)
+        };
+      })()`);
+      assert.eq(r.verticals.length, 2, 'expected two vertical trim lines, saw ' + r.verticals.join(', '));
+      assert.near(r.verticals[0], 5, 0.3, 'left trim line');
+      assert.near(r.verticals[1], 297 - 5, 0.3, 'right trim line');
+      assert.eq(r.horizontals.length, 2, 'expected two horizontal trim lines, saw ' + r.horizontals.join(', '));
+      assert.near(r.horizontals[0], 5, 0.3, 'top trim line');
+      assert.near(r.horizontals[1], 210 - 5, 0.3, 'bottom trim line');
+    });
+
     t.check('the on-screen chop band matches the margin and only marks real edges', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(() => {
@@ -273,6 +373,23 @@ module.exports = {
       await page.reset({ margin: 0 });
       const n = await page.evaluate("document.querySelectorAll('#sheet .chop').length");
       assert.eq(n, 0);
+    });
+
+    t.check('clicking "Trim it off" hides the chop bands immediately, no repaint needed', async () => {
+      await page.reset({ margin: 5, trimMargin: false });
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        buildInspector();
+        const before = document.querySelectorAll('#sheet .chop').length;
+        document.querySelector('[data-trim="1"]').click();
+        const afterTrim = document.querySelectorAll('#sheet .chop').length;
+        document.querySelector('[data-trim="0"]').click();
+        const afterLeave = document.querySelectorAll('#sheet .chop').length;
+        return { before: before, afterTrim: afterTrim, afterLeave: afterLeave };
+      })()`);
+      assert.ok(r.before > 0, 'the panel should start with chop bands showing');
+      assert.eq(r.afterTrim, 0, 'bands should vanish the instant "Trim it off" is clicked');
+      assert.ok(r.afterLeave > 0, 'bands should reappear the instant "Leave border" is clicked');
     });
 
     t.check('export raster is 300 dpi and carries the artwork', async () => {
