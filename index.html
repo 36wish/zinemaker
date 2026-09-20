@@ -74,6 +74,11 @@
     background: var(--bg2);
     border-bottom: 1px solid var(--line);
     flex-wrap: wrap;
+    /* A grid item's own min-width defaults to its content's, so without
+       this its buttons could force the grid track wider than the window
+       rather than wrapping or shrinking — and fitBar()'s own measurement
+       depends on the bar staying pinned to the real available width. */
+    min-width: 0;
   }
   .logo {
     font: 700 15px/1 "Courier New", monospace;
@@ -368,13 +373,36 @@
     /* The stage is the scarce thing here, so the toolbar sheds everything it
        can — the logo, the dividers, the words on the buttons — and wraps the
        rest itself rather than being told where to break. */
-    .bar { gap: 4px; padding: 7px 8px; padding-top: max(7px, env(safe-area-inset-top)); }
+    .bar {
+      gap: calc(4px * var(--bar-scale, 1));
+      padding: 7px 8px; padding-top: max(7px, env(safe-area-inset-top));
+    }
     .logo, .sep { display: none; }
     .btn-label { display: none; }
-    .icon { padding: 8px; }
+    .icon { padding: calc(8px * var(--bar-scale, 1)); }
+    .icon svg {
+      width: calc(18px * var(--bar-scale, 1)); height: calc(18px * var(--bar-scale, 1));
+    }
     /* A glyph button is otherwise as narrow as its glyph, nothing like a
-       fingertip. */
-    .bar button { min-width: 36px; }
+       fingertip — scaled down together with everything else so the floor
+       shrinks too, rather than fighting fitBar() on the narrowest phones. */
+    .bar button { min-width: calc(36px * var(--bar-scale, 1)); }
+    /* The two buttons still carrying text, sized the same way. fitBar() sets
+       --bar-scale on .bar only when the row would not otherwise fit; the
+       var() fallback keeps every rule above at its normal size until then. */
+    #helpBtn, #exportPdf {
+      padding: calc(9px * var(--bar-scale, 1)) calc(12px * var(--bar-scale, 1));
+      font-size: calc(13px * var(--bar-scale, 1));
+    }
+    /* fitBar() forces one line while it measures, so the true overflow
+       shows up in scrollWidth instead of being absorbed by a wrap — and
+       flex-shrink has to go too, or the same overflow gets absorbed by
+       squeezing the buttons instead, which would under-measure it.
+       scrollWidth only reliably includes that overflow once the element
+       is a scroll container, which overflow:visible (the normal state)
+       is not. */
+    .bar.measuring { flex-wrap: nowrap; overflow: hidden; }
+    .bar.measuring > * { flex-shrink: 0; }
     .spacer { display: none; }
     #panelBtn { display: inline-block; }
 

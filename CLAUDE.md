@@ -171,6 +171,28 @@ way sorts itself out. **Scope any CSS aimed at the toolbar's copy of these
 elements to `.bar`** (e.g. `.bar #title`), because an ID selector still matches
 them after they move.
 
+What is left in the toolbar (the icon buttons and the export split) still has to
+fit one row on any phone, not just the ones a breakpoint was written for, so
+`fitBar()` in `app.js` shrinks it by however much that width actually needs
+rather than by a fixed step. It writes a `--bar-scale` custom property that the
+narrow media query's `calc()` rules read back for padding, icon size, gap and
+the two remaining text buttons' font size; a wide screen never sets it, so
+`var(--bar-scale, 1)` falls back to full size everywhere. Measuring the overflow
+takes a `.measuring` class that forces one line — `flex-wrap` normally absorbs
+it before `scrollWidth` would ever show it, and `overflow: hidden` plus
+`flex-shrink: 0` on the children are both needed too, or the browser quietly
+shrinks or hides the same overflow instead of reporting it. **`.bar` needs
+`min-width: 0`** — a flex/grid item's own minimum otherwise defaults to its
+content's, so unshrinkable children could grow the toolbar's own grid track
+past the window instead of ever registering as overflow. Division from one
+measurement isn't exact (borders and glyphs do not shrink in step with
+padding), so it loops a few times, and aims a couple of pixels under budget —
+a fit measured to the exact pixel in the forced single-line layout can still
+round the wrong way once `flex-wrap` gets to decide for real, which costs a
+whole line. Runs from the same places as `syncDocSettings()`, after it, since
+moving the document controls out is what the bar's remaining children measure
+against.
+
 Touch is not just a narrower mouse:
 
 - `.sheet .el { touch-action: none }` — without it the browser claims the drag for

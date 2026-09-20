@@ -168,6 +168,43 @@ module.exports = {
       assert.ok(r.smallest >= 35, 'a toolbar button is only ' + r.smallest + 'px across');
     });
 
+    t.check('the toolbar stays one row by shrinking, on phones narrower than it expects', async () => {
+      // No fixed breakpoint owns this — sweep down to the narrowest phones
+      // still sold (320px) and confirm fitBar() earns its keep on each one.
+      for (const w of [320, 340, 360, 375, 390]) {
+        await page.reset();
+        await page.emulate(w, 740);
+        await settle();
+        const r = await page.evaluate(`(() => {
+          const bar = document.querySelector('.bar');
+          const tops = [...bar.children]
+            .filter(c => getComputedStyle(c).display !== 'none')
+            .map(c => c.getBoundingClientRect().top);
+          return {
+            oneRow: Math.max(...tops) - Math.min(...tops) < 3,   // sub-pixel wobble only
+            scale: parseFloat(getComputedStyle(bar).getPropertyValue('--bar-scale')),
+            scrollW: document.documentElement.scrollWidth
+          };
+        })()`);
+        assert.eq(r.oneRow, true, 'the toolbar wrapped to a second row at ' + w + 'px');
+        assert.ok(r.scale > 0 && r.scale <= 1, 'the scale should be a shrink factor at ' + w + 'px, got ' + r.scale);
+        assert.eq(r.scrollW <= w, true, 'shrinking should not itself cause sideways scroll at ' + w + 'px');
+      }
+    });
+
+    t.check('the toolbar only shrinks as far as it needs to, and not at all on a wide screen', async () => {
+      await phone();
+      const roomy = await page.evaluate(
+        "parseFloat(getComputedStyle(document.querySelector('.bar')).getPropertyValue('--bar-scale'))");
+      assert.near(roomy, 1, 0.05, 'a 390px phone has room to spare and should barely shrink, got ' + roomy);
+
+      await page.unemulate();
+      await settle();
+      const wide = await page.evaluate(
+        "getComputedStyle(document.querySelector('.bar')).getPropertyValue('--bar-scale')");
+      assert.eq(wide.trim(), '', 'a wide window should not be scaling the toolbar at all');
+    });
+
     t.check('the whole spread fits on the screen at once', async () => {
       await phone();
       const stage = await page.evaluate(`({

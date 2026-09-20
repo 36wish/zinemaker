@@ -1306,6 +1306,35 @@ function syncDocSettings() {
   $('#docSettings').hidden = !(narrow() && !helpOpen);
 }
 
+/* On a wide screen the toolbar always has room; on a phone it might not,
+   and no fixed breakpoint covers every handset. So rather than letting the
+   row wrap — which costs a whole second line of stage — shrink the buttons
+   by just enough to fit one, via the --bar-scale custom property the CSS
+   reads back (see the narrow media query). Only ever shrinks; a screen with
+   room to spare gets scale 1, same size as always.
+
+   flex-wrap normally absorbs the overflow before scrollWidth would show it,
+   so measuring forces one line with the .measuring class first. A single
+   division isn't exact — fixed borders and glyph widths do not shrink
+   perfectly in step with padding — so this runs a couple of times, each
+   pass correcting for whatever the last one over- or undershot. It aims a
+   couple of pixels under the real budget: a fit measured exactly to the
+   pixel in the forced single-line layout can still round the wrong way
+   once flex-wrap gets to decide for real, and that costs a whole line. */
+function fitBar() {
+  const bar = $('.bar'), SLACK = 2;
+  if (!narrow()) { bar.style.removeProperty('--bar-scale'); return; }
+  let scale = 1;
+  for (let i = 0; i < 6; i++) {
+    bar.style.setProperty('--bar-scale', scale.toFixed(3));
+    bar.classList.add('measuring');
+    const need = bar.scrollWidth, have = bar.clientWidth - SLACK;
+    bar.classList.remove('measuring');
+    if (need <= have || scale <= 0.7) break;
+    scale = Math.max(0.7, scale * (have / need));
+  }
+}
+
 const mm = pt => (pt / PT).toFixed(1);
 
 function marginNote() {
@@ -1923,10 +1952,13 @@ function init() {
     }
   });
   document.addEventListener('keydown', onKey);
-  // The thumbnails size themselves to the layout, and the document controls
-  // move between the toolbar and the settings sheet, so a resize may cross
-  // the breakpoint and need both redone, not just the zoom recomputed.
-  window.addEventListener('resize', () => { fitZoom(); paintStripSoon(); syncDocSettings(); });
+  // The thumbnails size themselves to the layout, the document controls move
+  // between the toolbar and the settings sheet, and the toolbar's own
+  // buttons may need to shrink or return to size — a resize can change any
+  // of that, not just the zoom.
+  window.addEventListener('resize', () => {
+    fitZoom(); paintStripSoon(); syncDocSettings(); fitBar();
+  });
 
   const stage = $('#stage');
   let dragDepth = 0;
@@ -1951,6 +1983,7 @@ function init() {
   });
 
   syncDocSettings();          // move title/paper/open/save in if we start narrow
+  fitBar();                   // and shrink the rest of the toolbar if it still needs it
   syncUndo();
   paintAll();
   save();
