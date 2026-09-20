@@ -397,6 +397,42 @@ module.exports = {
       assert.eq(r.text, 'persisted');
     });
 
+    t.check('image bytes move to IndexedDB, keeping localStorage free of the data URL', async () => {
+      await page.reset();
+      await page.evaluate(`(async () => {
+        const c = document.createElement('canvas');
+        c.width = 40; c.height = 30;
+        const x = c.getContext('2d');
+        x.fillStyle = '#2ecc71'; x.fillRect(0, 0, 40, 30);
+        const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+        setActive(4);
+        await addImageFiles([new File([blob], 'leaf.png', { type: 'image/png' })]);
+        save();
+        await new Promise(res => setTimeout(res, 500));
+      })()`);
+      const before = await page.evaluate(`(() => {
+        const raw = localStorage.getItem('zinemaker.v1');
+        const el = doc().panels[4].els.find(e => e.type === 'image');
+        return { rawHasDataUrl: raw.indexOf('data:image') >= 0, hasAssetId: !!el.assetId };
+      })()`);
+      assert.eq(before.rawHasDataUrl, false, 'localStorage should hold an assetId, not the image bytes');
+      assert.eq(before.hasAssetId, true, 'the element should pick up an assetId once it is saved');
+
+      await page.reload();
+      const after = await page.evaluate(`(async () => {
+        const el = doc().panels[4].els.find(e => e.type === 'image');
+        const probe = new Image();
+        await new Promise((res, rej) => { probe.onload = res; probe.onerror = rej; probe.src = el.src; });
+        const c = document.createElement('canvas');
+        c.width = probe.width; c.height = probe.height;
+        c.getContext('2d').drawImage(probe, 0, 0);
+        const px = c.getContext('2d').getImageData(0, 0, 1, 1).data;
+        return { isData: /^data:image\\//.test(el.src), pixel: [px[0], px[1], px[2]] };
+      })()`);
+      assert.eq(after.isData, true, 'IndexedDB should hand back a data URL after reload');
+      assert.deepEq(after.pixel, [46, 204, 113], 'the pixels should survive the round trip through IndexedDB');
+    });
+
     t.check('"Start over" clears the title along with the document', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {

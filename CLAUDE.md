@@ -31,10 +31,11 @@ node --check app.js && node --check qr.js
 ```
 
 **Never add a bundler, a CDN `<script>`, or an npm dependency.** The app is required
-to work offline from a `file://` URL *and* to be servable as a static GitHub Page —
-that constraint is why the PDF writer, the QR encoder and the DOM rasteriser are all
-hand-rolled here. The test suite obeys the same rule: Node 18+ has `fetch` and
-`WebSocket` built in, so nothing needs installing.
+to be servable as a static GitHub Page (or any other plain static host) with no
+build step — that constraint is why the PDF writer, the QR encoder and the DOM
+rasteriser are all hand-rolled here. It is not required to work from a `file://`
+URL; the app is meant to be hosted. The test suite obeys the same no-dependency
+rule: Node 18+ has `fetch` and `WebSocket` built in, so nothing needs installing.
 
 ### How the tests work
 
@@ -105,13 +106,47 @@ millimetres, which is what the UI shows the user. Element coordinates are always
 
 One `state` object, autosaved to `localStorage` under `zinemaker.v1` on a debounce,
 and sanitised through `fixDoc()` on load. The document is `state.docs.mini` (8
-panels). Undo/redo snapshots `state.docs` as JSON, capped at 10 entries because
-images live inline as data URLs. Loaders ignore the old `mode`, `spread` and
-`docs.flat` fields, so files and storage written by earlier versions still open.
+panels). Undo/redo snapshots `state.docs` as JSON, capped at 10 entries — these
+snapshots are in-memory only and never touch `localStorage`, so they still carry
+each image element's in-memory `src` in full. Loaders ignore the old `mode`,
+`spread` and `docs.flat` fields, so files and storage written by earlier versions
+still open.
 
-Images are **always data URLs**, never blob URLs. Canvas rasterisation of an SVG that
-references a blob URL can taint the canvas on a `file://` origin; data URLs cannot.
-Imports are downscaled to 1500px on the long edge to survive the ~5 MB storage budget.
+Images are **always data URLs in memory**, never blob URLs — an SVG loaded as an
+image for export cannot fetch a blob URL's bytes, so `rasterize()` needs a data URL
+regardless of where the app is hosted. But a zine with more than a couple of photos
+would blow well past `localStorage`'s ~5 MB budget if those data URLs sat in the
+JSON `save()` writes, which is why the bytes themselves live in IndexedDB instead
+(see "Image storage" below); imports are still downscaled to 1500px on the long
+edge, since nothing is served at higher resolution than that on a 74mm-wide panel.
+
+### Image storage
+
+Image elements carry `assetId` — a content hash of the image's bytes — instead of
+`src` once `saveNow()` (inside `save()`'s debounce) has migrated them: `migrateImages()`
+hands any element that still only has an in-memory `src` and no `assetId` to
+`putImage()`, which hashes it with `contentId()`, stores it in the `zinemaker-images`
+IndexedDB database keyed by that hash, and returns the id. Because the id is a pure
+function of the bytes, two elements — or two saves — sharing a photo end up sharing
+one row for free, the same dedup `saveZine()` does independently for the `.zine`
+file's own asset table. `saveNow()` then writes `state` to `localStorage` with `src`
+stripped from every element that has an `assetId`, so the JSON blob never carries
+image bytes.
+
+`load()` does the reverse through `hydrateImages()`: every element with an `assetId`
+but no `src` gets one rebuilt from IndexedDB via `getImage()` and `bytesDataUrl()`.
+That is also the only point that calls `pruneImages()` to delete IndexedDB rows
+nothing in the freshly loaded document references any more — safe only there,
+because undo/redo history (the other thing that could still need an old image) lives
+in memory and never survives a reload. Nothing is pruned mid-session: an element
+that stops using a photo just leaves its row orphaned until the next load.
+
+A freshly added image, or one read back from an opened `.zine` file, is just an
+element with `src` and no `assetId` yet — it needs no separate code path, since
+`migrateImages()` picks it up the next time anything calls `save()`. If IndexedDB is
+unavailable, `migrateImages()`/`hydrateImages()` fail quietly and elements keep
+their `src` inline, falling back to exactly the pre-IndexedDB behaviour (and its
+~5 MB ceiling).
 
 ### Imposition, spreads and the printer rim
 
