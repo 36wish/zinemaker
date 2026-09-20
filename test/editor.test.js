@@ -397,5 +397,20 @@ module.exports = {
       assert.eq(r.text, 'persisted');
     });
 
+    t.check('"Start over" clears the title along with the document', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        $('#title').value = 'my great zine'; state.title = 'my great zine';
+        setActive(2); addText(); stopEdit();
+        select(null); buildInspector();
+        document.querySelector('[data-act="clearAll"]').click();
+        return { stateTitle: state.title, inputValue: $('#title').value,
+                 panelEmpty: doc().panels[2].els.length === 0 };
+      })()`);
+      assert.eq(r.stateTitle, 'untitled zine');
+      assert.eq(r.inputValue, 'untitled zine', 'the title field should reset along with state.title');
+      assert.eq(r.panelEmpty, true);
+    });
+
   }
 };

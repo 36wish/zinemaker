@@ -375,6 +375,23 @@ module.exports = {
       assert.eq(n, 0);
     });
 
+    t.check('clicking "Trim it off" hides the chop bands immediately, no repaint needed', async () => {
+      await page.reset({ margin: 5, trimMargin: false });
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        buildInspector();
+        const before = document.querySelectorAll('#sheet .chop').length;
+        document.querySelector('[data-trim="1"]').click();
+        const afterTrim = document.querySelectorAll('#sheet .chop').length;
+        document.querySelector('[data-trim="0"]').click();
+        const afterLeave = document.querySelectorAll('#sheet .chop').length;
+        return { before: before, afterTrim: afterTrim, afterLeave: afterLeave };
+      })()`);
+      assert.ok(r.before > 0, 'the panel should start with chop bands showing');
+      assert.eq(r.afterTrim, 0, 'bands should vanish the instant "Trim it off" is clicked');
+      assert.ok(r.afterLeave > 0, 'bands should reappear the instant "Leave border" is clicked');
+    });
+
     t.check('export raster is 300 dpi and carries the artwork', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(async () => {

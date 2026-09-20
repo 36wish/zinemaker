@@ -1338,12 +1338,20 @@ function wireInspector() {
     applyTemplate(TEMPLATES[+b.dataset.tpl]);
   }));
 
-  [['data-cut', 'cut'], ['data-guides', 'guides'], ['data-trim', 'trimMargin']].forEach(pair => {
+  [['data-cut', 'cut'], ['data-guides', 'guides']].forEach(pair => {
     side.querySelectorAll('[' + pair[0] + ']').forEach(b => b.addEventListener('click', () => {
       state[pair[1]] = b.getAttribute(pair[0]) === '1';
       buildInspector(); save();
     }));
   });
+
+  /* Trimming changes geom() itself (panel size and the on-screen chop bands
+     both depend on it), so the sheet needs a real repaint, not just the
+     inspector text. */
+  side.querySelectorAll('[data-trim]').forEach(b => b.addEventListener('click', () => {
+    state.trimMargin = b.getAttribute('data-trim') === '1';
+    paintAll(); save();
+  }));
 
   /* Print settings sit outside the undo stack, which only snapshots state.docs. */
   side.querySelectorAll('[data-margin]').forEach(node => {
@@ -1380,7 +1388,9 @@ function wireInspector() {
       if (!confirm('Delete this whole zine and start over?')) return;
       pushHistory();
       state.docs = { mini: blankDoc(8) };
+      state.title = 'untitled zine';
       state.active = 0; selId = null;
+      $('#title').value = state.title;
       paintAll(); save();
     }
   }));
