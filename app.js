@@ -1,7 +1,8 @@
 /* Zine Maker — one sheet of paper, eight panels.
-   Everything lives in localStorage; export rasterises the sheet through an
-   SVG <foreignObject> and wraps the JPEG in a hand-rolled PDF, so there are
-   no dependencies and the whole thing works offline from file://. */
+   Document state lives in localStorage; image bytes live in IndexedDB, kept
+   out of that JSON so a handful of photos never blow its budget. Export
+   rasterises the sheet through an SVG <foreignObject> and wraps the JPEG in
+   a hand-rolled PDF, so there are no dependencies. */
 
 'use strict';
 
@@ -150,16 +151,23 @@ function geom() {
 let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-    } catch (err) {
-      toast('Browser storage is full — recent changes were not saved.', 5000);
-    }
-  }, 250);
+  saveTimer = setTimeout(saveNow, 250);
 }
 
-function load() {
+async function saveNow() {
+  try { await migrateImages(); } catch (err) { /* IndexedDB unavailable: src stays inline below */ }
+  const docs = JSON.parse(JSON.stringify(state.docs));
+  Object.values(docs).forEach(d => d.panels.forEach(p => p.els.forEach(el => {
+    if (el.type === 'image' && el.assetId) delete el.src;
+  })));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(Object.assign({}, state, { docs: docs })));
+  } catch (err) {
+    toast('Browser storage is full — recent changes were not saved.', 5000);
+  }
+}
+
+async function load() {
   let raw = null;
   try { raw = localStorage.getItem(KEY); } catch (err) { /* private mode */ }
   if (!raw) return false;
@@ -179,6 +187,7 @@ function load() {
       docs: { mini: fixDoc(s.docs.mini, 8) }
     };
     state.active = Math.min(Math.max(0, s.active | 0), doc().panels.length - 1);
+    await hydrateImages();
     return true;
   } catch (err) { return false; }
 }
@@ -194,6 +203,121 @@ function fixDoc(d, n) {
       .map(e => Object.assign({}, e, { id: e.id || uid() }));
   }
   return out;
+}
+
+/* --------------------------------------------------------------- images
+
+   Image bytes live in IndexedDB, not localStorage: a zine with more than a
+   couple of photos would blow the ~5 MB localStorage budget long before the
+   1500px downscale in importImage() ever came close. An image element in
+   state.docs carries assetId, a hash of its bytes, in place of the src data
+   URL it needs to render — saveNow() drops src before writing to
+   localStorage once an element has an assetId, and hydrateImages() rebuilds
+   src from IndexedDB after a reload. Content-addressing means two elements
+   sharing a photo share one row for free, the same dedup saveZine() already
+   does for the .zine file — and a freshly imported image, or one read back
+   from a .zine, is simply src with no assetId yet, so it is migrated into
+   IndexedDB the first time saveNow() runs rather than needing its own path.
+
+   Nothing is deleted mid-session: an element that stops using a photo just
+   leaves its row unreferenced. pruneImages() runs once, right after load(),
+   because that is the only moment nothing else — undo history included,
+   which lives in memory only and does not survive a reload — could still
+   need it. */
+
+let imageDbPromise = null;
+function imageDb() {
+  if (!imageDbPromise) {
+    imageDbPromise = new Promise((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') { reject(new Error('no indexedDB')); return; }
+      const req = indexedDB.open('zinemaker-images', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('images');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return imageDbPromise;
+}
+
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* A fast, non-cryptographic hash: a collision would only ever show the
+   wrong photo, never anything security-sensitive, and this has to run on
+   every image add without an async round trip. */
+function contentId(bytes) {
+  let h1 = 0x811c9dc5, h2 = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h1 = Math.imul(h1 ^ bytes[i], 0x01000193);
+    h2 = Math.imul(h2 ^ bytes[bytes.length - 1 - i], 0x01000193);
+  }
+  return (h1 >>> 0).toString(16).padStart(8, '0') +
+         (h2 >>> 0).toString(16).padStart(8, '0') +
+         bytes.length.toString(16);
+}
+
+async function putImage(dataUrl) {
+  const a = dataUrlBytes(dataUrl);
+  if (!a) return null;
+  const id = contentId(a.bytes);
+  const db = await imageDb();
+  const store = db.transaction('images', 'readwrite').objectStore('images');
+  const existing = await idbRequest(store.get(id));
+  if (!existing) await idbRequest(store.put({ type: a.type, bytes: a.bytes }, id));
+  return id;
+}
+
+async function getImage(id) {
+  const db = await imageDb();
+  return idbRequest(db.transaction('images', 'readonly').objectStore('images').get(id));
+}
+
+async function pruneImages(keepIds) {
+  const db = await imageDb();
+  const store = db.transaction('images', 'readwrite').objectStore('images');
+  const keys = await idbRequest(store.getAllKeys());
+  keys.forEach(k => { if (!keepIds.has(k)) store.delete(k); });
+}
+
+/* Give every image element still holding only its in-memory src (freshly
+   added, or read back from a .zine file) a home in IndexedDB and an
+   assetId, the first time it is saved. */
+async function migrateImages() {
+  for (const d of Object.values(state.docs)) {
+    for (const p of d.panels) {
+      for (const el of p.els) {
+        if (el.type === 'image' && !el.assetId && typeof el.src === 'string') {
+          const id = await putImage(el.src);
+          if (id) el.assetId = id;
+        }
+      }
+    }
+  }
+}
+
+/* Fill in the data URL every image element needs to render — localStorage
+   never held it, only assetId — then drop anything IndexedDB is holding
+   that the document just loaded does not reference any more. */
+async function hydrateImages() {
+  const keep = new Set();
+  for (const d of Object.values(state.docs)) {
+    for (const p of d.panels) {
+      for (const el of p.els) {
+        if (el.type !== 'image' || !el.assetId) continue;
+        keep.add(el.assetId);
+        if (typeof el.src === 'string') continue;
+        try {
+          const rec = await getImage(el.assetId);
+          if (rec) el.src = bytesDataUrl(rec.type, rec.bytes);
+        } catch (err) { /* IndexedDB unavailable: element renders empty */ }
+      }
+    }
+  }
+  try { await pruneImages(keep); } catch (err) { /* not critical */ }
 }
 
 /* ------------------------------------------------------------------ history */
@@ -2064,8 +2188,8 @@ function closeExportMenu() {
   $('#exportMenuBtn').setAttribute('aria-expanded', 'false');
 }
 
-function init() {
-  if (!load()) seed();
+async function init() {
+  if (!(await load())) seed();
 
   $('#title').value = state.title;
   $('#paper').value = state.paper;
