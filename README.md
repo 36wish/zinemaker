@@ -81,6 +81,12 @@ See [`CLAUDE.md`](CLAUDE.md) for the full architecture writeup (imposition
 tables, rendering pipeline, mobile layout, export internals, and so on), and
 [`fileformat.md`](fileformat.md) for the `.zine` container and PDF formats.
 
+Layouts in `app.js`'s `TEMPLATES` array are hand-written as fractions of a
+panel, which is tedious to eyeball. `tools/template-editor.html` is a
+standalone dev tool (not linked from the app) for laying a template out
+visually — drag slots, tweak them in a form, copy the generated object
+straight into `TEMPLATES`.
+
 **Never add a bundler, a CDN `<script>`, or an npm dependency.** The app is
 required to work offline from a `file://` URL and to be servable as a static
 site with nothing to build — that's why the PDF writer, the QR encoder, and
