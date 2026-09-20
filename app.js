@@ -1238,6 +1238,7 @@ function setHelp(open) {
   btn.setAttribute('aria-pressed', helpOpen ? 'true' : 'false');
   paintHelp();
   if (helpOpen && narrow()) setSide(true);     // nowhere else for it to appear
+  syncDocSettings();          // help takes the same spot in the sheet
 }
 
 /* -------------------------------------------------------- the side as a sheet
@@ -1261,6 +1262,48 @@ function setSide(open) {
 function syncSideBtn() {
   const btn = $('#panelBtn');
   if (btn) btn.classList.toggle('hot', !sideOpen && !!findSel());
+}
+
+/* The title, paper size and file buttons live in the toolbar on a wide
+   screen, where there is room for them; a phone has none, so they park in
+   a "Document" group at the top of the settings sheet instead. Moving the
+   real elements (rather than cloning them and syncing two copies) keeps
+   their listeners and values automatically correct wherever they are. A
+   comment node dropped in front of each one on first use marks where it
+   came from, so putting it back is just `marker.after(el)`. */
+const MOBILE_SETTINGS = [
+  { id: 'title', slot: 'slotTitle' },
+  { id: 'paper', slot: 'slotPaper' },
+  { id: 'openZine', slot: 'slotOpen' },
+  { id: 'saveZine', slot: 'slotSave' }
+];
+let mobileAnchors = null, mobileControlsIn = false;
+
+function captureMobileAnchors() {
+  mobileAnchors = MOBILE_SETTINGS.map(m => {
+    const el = $('#' + m.id);
+    const marker = document.createComment(m.id);
+    el.parentNode.insertBefore(marker, el);
+    return { el: el, marker: marker, slot: m.slot };
+  });
+}
+
+function layoutMobileControls() {
+  if (!mobileAnchors) captureMobileAnchors();
+  const wantIn = narrow();
+  if (wantIn === mobileControlsIn) return;      // already where it should be
+  mobileControlsIn = wantIn;
+  mobileAnchors.forEach(a => {
+    if (wantIn) $('#' + a.slot).appendChild(a.el);
+    else a.marker.after(a.el);
+  });
+}
+
+/* Help takes over the same sheet, so the document group hides while help is
+   open rather than fighting it for space. */
+function syncDocSettings() {
+  layoutMobileControls();
+  $('#docSettings').hidden = !(narrow() && !helpOpen);
 }
 
 const mm = pt => (pt / PT).toFixed(1);
@@ -1880,9 +1923,10 @@ function init() {
     }
   });
   document.addEventListener('keydown', onKey);
-  // The thumbnails size themselves to the layout, so a resize may cross the
-  // breakpoint and need them redrawn, not just the zoom recomputed.
-  window.addEventListener('resize', () => { fitZoom(); paintStripSoon(); });
+  // The thumbnails size themselves to the layout, and the document controls
+  // move between the toolbar and the settings sheet, so a resize may cross
+  // the breakpoint and need both redone, not just the zoom recomputed.
+  window.addEventListener('resize', () => { fitZoom(); paintStripSoon(); syncDocSettings(); });
 
   const stage = $('#stage');
   let dragDepth = 0;
@@ -1906,6 +1950,7 @@ function init() {
     if (files.length) { e.preventDefault(); addImageFiles(files); }
   });
 
+  syncDocSettings();          // move title/paper/open/save in if we start narrow
   syncUndo();
   paintAll();
   save();

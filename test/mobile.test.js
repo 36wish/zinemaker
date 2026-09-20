@@ -103,6 +103,54 @@ module.exports = {
       await settle();
     });
 
+    t.check('title, paper size and the file buttons move into the settings sheet', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => ({
+        inBarBefore: !!document.querySelector('.bar #title, .bar #paper, .bar #openZine, .bar #saveZine'),
+        title: document.getElementById('slotTitle').contains(document.getElementById('title')),
+        paper: document.getElementById('slotPaper').contains(document.getElementById('paper')),
+        open: document.getElementById('slotOpen').contains(document.getElementById('openZine')),
+        save: document.getElementById('slotSave').contains(document.getElementById('saveZine'))
+      }))()`);
+      assert.eq(r.inBarBefore, false, 'the toolbar should not still hold them');
+      assert.eq(r.title, true, 'the title input should be in its slot');
+      assert.eq(r.paper, true, 'the paper select should be in its slot');
+      assert.eq(r.open, true, 'the open button should be in its slot');
+      assert.eq(r.save, true, 'the save button should be in its slot');
+    });
+
+    t.check('the moved title and paper controls still drive real state', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        const t = document.getElementById('title');
+        t.value = 'Phone Edited';
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+        const p = document.getElementById('paper');
+        p.value = 'letter';
+        p.dispatchEvent(new Event('change', { bubbles: true }));
+        return { title: state.title, paper: state.paper };
+      })()`);
+      assert.eq(r.title, 'Phone Edited', 'the relocated title input should still update state');
+      assert.eq(r.paper, 'letter', 'the relocated paper select should still update state');
+    });
+
+    t.check('help hides the document group without moving its controls back out', async () => {
+      await phone();
+      await page.evaluate("document.getElementById('helpBtn').click()");
+      await settle();
+      const open = await page.evaluate(`({
+        docHidden: document.getElementById('docSettings').hidden,
+        stillParked: document.getElementById('slotTitle').contains(document.getElementById('title'))
+      })`);
+      assert.eq(open.docHidden, true, 'help takes over the sheet, so the document group steps aside');
+      assert.eq(open.stillParked, true, 'closing help should not have to re-fetch the title from the toolbar');
+
+      await page.evaluate("setHelp(false); setSide(false);");
+      await settle();
+      const closed = await page.evaluate("document.getElementById('docSettings').hidden");
+      assert.eq(closed, false, 'closing help brings the document group back');
+    });
+
     t.check('nothing overflows the width, and the toolbar leaves the stage room', async () => {
       await phone();
       const r = await page.evaluate(`({
@@ -213,18 +261,32 @@ module.exports = {
     });
 
     t.check('the desktop layout comes back on a wide window', async () => {
+      await phone();
+      await page.evaluate(`(() => {
+        const t = document.getElementById('title');
+        t.value = 'Round Trip'; t.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
       await page.unemulate();
       await settle();
       const r = await page.evaluate(`(() => {
         const side = document.getElementById('side').getBoundingClientRect();
         return { narrow: narrow(), sideRight: Math.round(side.right),
                  inner: innerWidth, sideTop: Math.round(side.top),
-                 toggle: getComputedStyle(document.getElementById('panelBtn')).display };
+                 toggle: getComputedStyle(document.getElementById('panelBtn')).display,
+                 titleInBar: document.querySelector('.bar #title') === document.getElementById('title'),
+                 openInBar: document.querySelector('.bar #openZine') !== null,
+                 titleVal: document.getElementById('title').value,
+                 docHidden: document.getElementById('docSettings').hidden
+               };
       })()`);
       assert.eq(r.narrow, false);
       assert.eq(r.toggle, 'none', 'the toggle belongs to the phone layout only');
       assert.near(r.sideRight, r.inner, 2, 'the inspector is a column again');
       assert.ok(r.sideTop < 200, 'and runs the height of the window');
+      assert.eq(r.titleInBar, true, 'the title input should be back in the toolbar');
+      assert.eq(r.openInBar, true, 'the file buttons should be back in the toolbar too');
+      assert.eq(r.titleVal, 'Round Trip', 'moving it back must not lose what was typed');
+      assert.eq(r.docHidden, true, 'the document group has nothing to show on a wide screen');
     });
   },
 

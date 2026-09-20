@@ -156,6 +156,21 @@ column and becomes a sheet that slides up over the stage, toggled by `#panelBtn`
 phone** — it is the only place most controls exist, which is what the earlier
 breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
 
+The title, paper size and the open/save buttons live in the toolbar on a wide
+screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
+the real elements — not clones — into a "Document" group at the top of the sheet
+(`#docSettings`, with `#slotTitle`/`#slotPaper`/`#slotOpen`/`#slotSave` as the
+landing spots). `captureMobileAnchors()` drops a comment node in front of each one
+the first time it runs, so `layoutMobileControls()` can put it back with
+`marker.after(el)` on a wide screen; nothing is cloned, so there is no second copy
+to keep in sync. `syncDocSettings()` drives both the move and `#docSettings`'
+visibility, and hides that whole group while help is open rather than moving
+anything — help and the document group share the one sheet. It runs from `init()`,
+from `setHelp()`, and from the `resize` handler, so crossing the breakpoint either
+way sorts itself out. **Scope any CSS aimed at the toolbar's copy of these
+elements to `.bar`** (e.g. `.bar #title`), because an ID selector still matches
+them after they move.
+
 Touch is not just a narrower mouse:
 
 - `.sheet .el { touch-action: none }` — without it the browser claims the drag for
