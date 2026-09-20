@@ -950,6 +950,7 @@ function onKey(e) {
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSel(); return; }
   if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
   if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
+  if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
   if (e.key === 'Escape') { select(null); return; }
   const el = selected();
   if (!el) return;
@@ -1003,13 +1004,18 @@ function foldDiagram() {
     (mmv > 0 ? ', dashed = printable area' : '') + '</text></svg>';
 }
 
+/* On a phone the settings button means the whole project, full stop, so the
+   sheet it opens never switches to a selected element's own controls — see
+   syncElemDrawer() for where those go instead. On a wide screen there is no
+   such button and no elem-drawer; the one sidebar column still shows
+   whichever is relevant, as it always has. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
-  side.innerHTML = el ? inspectorForEl(el) : inspectorForPage();
-  wireInspector();
+  side.innerHTML = (!narrow() && el) ? inspectorForEl(el) : inspectorForPage();
+  wireInspector(side);
+  syncElemDrawer();
   updateMeter();
   paintHelp();
-  syncSideBtn();
 }
 
 function inspectorForEl(el) {
@@ -1254,14 +1260,38 @@ function setSide(open) {
   document.body.classList.toggle('side-open', sideOpen);
   $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
   $('#panelBtn').classList.toggle('on', sideOpen);
-  syncSideBtn();
 }
 
-/* With the controls behind a button, nothing would otherwise point at them
-   after you pick something up, so the button lights while the sheet is shut. */
-function syncSideBtn() {
-  const btn = $('#panelBtn');
-  if (btn) btn.classList.toggle('hot', !sideOpen && !!findSel());
+/* ---------------------------------------------------- the element's drawer
+
+   A second sheet, independent of #side: the settings button is the whole
+   project's, never a selected element's, so a selection gets its own bar
+   instead of borrowing that one. It appears — closed, as a peeking bar —
+   the instant something becomes selected, and disappears the instant
+   nothing is. Opening it is a separate choice, left up to whoever wants it. */
+let elemDrawerOpen = false;
+
+function setElemDrawer(open) {
+  elemDrawerOpen = !!open;
+  $('#elemDrawer').classList.toggle('open', elemDrawerOpen);
+  $('#elemPeek').setAttribute('aria-expanded', elemDrawerOpen ? 'true' : 'false');
+}
+
+const elemLabel = el => el.type === 'text' ? 'Text' : el.type === 'qr' ? 'QR code' : 'Image';
+
+function syncElemDrawer() {
+  const el = selected(), drawer = $('#elemDrawer');
+  const show = narrow() && !!el;
+  const wasShown = !drawer.hidden;
+  drawer.hidden = !show;
+  if (!show) {
+    if (wasShown) setElemDrawer(false);     // closed again, ready for next time
+    return;
+  }
+  if (!wasShown) setElemDrawer(false);      // just appeared: start closed, not sprung open
+  $('#elemPeekLabel').textContent = elemLabel(el);
+  $('#elemInspector').innerHTML = inspectorForEl(el);
+  wireInspector($('#elemInspector'));
 }
 
 /* The title, paper size and file buttons live in the toolbar on a wide
@@ -1362,9 +1392,11 @@ function marginNote() {
     '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
 }
 
-function wireInspector() {
-  const side = $('#inspector');
-
+/* Shared between #inspector and, on a phone, #elemInspector — each only
+   ever holds markup relevant to itself (data-k and friends are exclusive to
+   inspectorForEl's output, the rest to inspectorForPage's), so wiring both
+   from the same set of selectors is safe. */
+function wireInspector(side) {
   side.querySelectorAll('[data-k]').forEach(node => {
     const k = node.dataset.k;
     const num = node.hasAttribute('data-num');
@@ -1456,7 +1488,9 @@ function wireInspector() {
 function syncInspector() {
   const el = selected();
   if (!el) return;
-  $('#inspector').querySelectorAll('[data-k]').forEach(node => {
+  // A phone keeps the element's own fields in #elemInspector, never #inspector.
+  const side = narrow() ? $('#elemInspector') : $('#inspector');
+  side.querySelectorAll('[data-k]').forEach(node => {
     if (node.tagName === 'BUTTON' || node === document.activeElement) return;
     const v = el[node.dataset.k];
     if (v != null && node.value !== String(v)) node.value = v;
@@ -1920,6 +1954,7 @@ function init() {
   $('#helpBtn').addEventListener('click', () => setHelp(!helpOpen));
   $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
   $('#sideClose').addEventListener('click', () => setSide(false));
+  $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
     e.target.value = '';
@@ -1953,11 +1988,12 @@ function init() {
   });
   document.addEventListener('keydown', onKey);
   // The thumbnails size themselves to the layout, the document controls move
-  // between the toolbar and the settings sheet, and the toolbar's own
-  // buttons may need to shrink or return to size — a resize can change any
-  // of that, not just the zoom.
+  // between the toolbar and the settings sheet, the toolbar's own buttons
+  // may need to shrink or return to size, and which sheet a selection's
+  // controls live in depends on the same breakpoint — a resize can change
+  // any of that, not just the zoom.
   window.addEventListener('resize', () => {
-    fitZoom(); paintStripSoon(); syncDocSettings(); fitBar();
+    fitZoom(); paintStripSoon(); syncDocSettings(); fitBar(); buildInspector();
   });
 
   const stage = $('#stage');

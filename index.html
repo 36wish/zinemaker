@@ -345,7 +345,7 @@
      layout below ever leaves it there. */
   .side-bar { display: none; }
   #panelBtn { display: none; }
-  #panelBtn.hot { border-color: var(--accent2); color: #fff; }
+  .elem-drawer { display: none; }
 
   /* ---------- touch ---------- */
   /* Sized by the finger rather than the pointer, on any touch screen. */
@@ -442,6 +442,42 @@
       position: absolute; left: 50%; top: 50%; margin: -2px 0 0 -23px;
       width: 46px; height: 4px; border-radius: 2px; background: var(--line);
     }
+
+    /* ---------- the selected element's own drawer ---------- */
+    /* A second, independent sheet from .side: this one is about whatever is
+       selected, not the project, so it appears by itself — as a closed bar
+       peeking up from the bottom — the moment something is, rather than
+       taking over the settings button. translateY moves it down by its own
+       height minus the peek bar's, so only that bar stays on screen; the
+       fields below it stay off until .open. */
+    .elem-drawer {
+      display: block;
+      position: fixed; z-index: 65; left: 0; right: 0; bottom: 0;
+      max-height: min(62vh, 440px);
+      background: var(--bg2);
+      border-top: 1px solid var(--line);
+      border-radius: 14px 14px 0 0;
+      box-shadow: 0 -10px 28px rgba(0, 0, 0, .45);
+      overflow-y: auto; overscroll-behavior: contain;
+      transform: translateY(calc(100% - 48px));
+      transition: transform .2s ease;
+    }
+    .elem-drawer[hidden] { display: none; }
+    .elem-drawer.open { transform: translateY(0); }
+    /* The settings sheet already owns the bottom edge while it is open. */
+    body.side-open .elem-drawer { transform: translateY(calc(100% + 40px)); }
+    .elem-peek {
+      display: flex; align-items: center; gap: 8px; width: 100%; height: 48px;
+      position: sticky; top: 0; z-index: 1;
+      padding: 0 14px; margin: 0; border: none; border-radius: 0;
+      background: var(--bg2); color: var(--fg); font: inherit; text-align: left;
+      cursor: pointer;
+    }
+    .elem-peek-label { flex: 1; font-weight: 700; font-size: 13px; }
+    .elem-peek-chevron { flex: none; width: 16px; height: 16px; color: var(--dim); transition: transform .2s; }
+    .elem-drawer.open .elem-peek-chevron { transform: rotate(180deg); }
+    #elemInspector { padding: 0 14px calc(14px + env(safe-area-inset-bottom)); }
+
     /* 16px or smaller, and iOS zooms the whole page in on focus. */
     input[type="text"], input[type="number"], select { font-size: 16px; }
     .toast { bottom: calc(18px + env(safe-area-inset-bottom)); }
@@ -580,6 +616,18 @@
   <div id="help" class="help" hidden></div>
   <div id="inspector"></div>
 </aside>
+<!-- The selected element's own controls, on a phone only (see syncElemDrawer
+     in app.js). Separate from #side: the toolbar's settings button always
+     means the whole project, never the selection, so this appears on its
+     own — closed, as a bar peeking up from the bottom — the moment something
+     is selected, rather than taking over the settings button's sheet. -->
+<div class="elem-drawer" id="elemDrawer" hidden>
+  <button type="button" class="elem-peek" id="elemPeek" aria-expanded="false" aria-controls="elemInspector">
+    <span class="elem-peek-label" id="elemPeekLabel"></span>
+    <svg class="elem-peek-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+  </button>
+  <div id="elemInspector"></div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script src="qr.js"></script>

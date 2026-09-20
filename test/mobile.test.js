@@ -281,20 +281,89 @@ module.exports = {
       assert.eq(r, null, 'dragging then tapping must not drop into the text');
     });
 
-    t.check('the toggle flags a selection while the controls are hidden', async () => {
+    t.check('a selection gets its own drawer, closed, separate from the settings button', async () => {
       await phone();
       const r = await page.evaluate(`(() => {
-        const btn = document.getElementById('panelBtn');
         setActive(1); addText(); stopEdit();
-        const withSel = btn.classList.contains('hot');
-        setSide(true);
-        const whileOpen = btn.classList.contains('hot');
-        setSide(false); select(null);
-        return { withSel: withSel, whileOpen: whileOpen, empty: btn.classList.contains('hot') };
+        const el = selected();
+        const drawer = document.getElementById('elemDrawer');
+        return {
+          shown: !drawer.hidden,
+          open: drawer.classList.contains('open'),
+          label: document.getElementById('elemPeekLabel').textContent,
+          pageStillShowsPage: document.getElementById('inspector').textContent.indexOf('This page') >= 0,
+          pageHasNoElementFields: !document.querySelector('#inspector [data-k]')
+        };
       })()`);
-      assert.eq(r.withSel, true, 'picking something up should point at the controls');
-      assert.eq(r.whileOpen, false, 'with the sheet open the hint is noise');
-      assert.eq(r.empty, false);
+      assert.eq(r.shown, true, 'selecting something should bring the drawer up');
+      assert.eq(r.open, false, 'it should appear closed, not sprung open');
+      assert.eq(r.label, 'Text', 'the peek should say what is selected');
+      assert.eq(r.pageStillShowsPage, true,
+        'the settings sheet must keep showing the project, not the selection');
+      assert.eq(r.pageHasNoElementFields, true,
+        'a selected element\'s own fields must not leak into the settings sheet');
+    });
+
+    t.check('nothing selected means no drawer, and deselecting closes it again', async () => {
+      await phone();
+      const before = await page.evaluate("document.getElementById('elemDrawer').hidden");
+      assert.eq(before, true, 'nothing is selected yet, so there is nothing to peek at');
+
+      await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        document.getElementById('elemPeek').click();
+      })()`);
+      await settle();
+      assert.eq(await page.evaluate("document.getElementById('elemDrawer').classList.contains('open')"),
+        true, 'the peek should open on tap');
+
+      await page.evaluate('select(null)');
+      await settle();
+      const after = await page.evaluate(`({
+        hidden: document.getElementById('elemDrawer').hidden,
+        open: document.getElementById('elemDrawer').classList.contains('open')
+      })`);
+      assert.eq(after.hidden, true, 'deselecting should take the drawer away entirely');
+      assert.eq(after.open, false, 'and it should not remember being open for next time');
+    });
+
+    t.check('opening the settings sheet pushes the element drawer aside, and back', async () => {
+      await phone();
+      await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        document.getElementById('elemPeek').click();
+      })()`);
+      await settle();
+      const withBoth = await page.evaluate(`(() => {
+        document.getElementById('panelBtn').click();
+        return true;
+      })()`);
+      await settle();
+      const r = await page.evaluate(`(() => {
+        const d = document.getElementById('elemDrawer').getBoundingClientRect();
+        return { top: Math.round(d.top), innerH: innerHeight };
+      })()`);
+      assert.ok(r.top >= r.innerH, 'the element drawer should be off screen while settings is open, got top=' + r.top);
+
+      await page.evaluate("setSide(false)");
+      await settle();
+      const back = await page.evaluate(`(() => {
+        const d = document.getElementById('elemDrawer').getBoundingClientRect();
+        return { top: Math.round(d.top), open: document.getElementById('elemDrawer').classList.contains('open') };
+      })()`);
+      assert.ok(back.top < 740, 'the element drawer should come back once settings closes');
+      assert.eq(back.open, true, 'it should remember it was open');
+    });
+
+    t.check('the settings button never switches to a selected element, on a wide screen either', async () => {
+      await page.unemulate();
+      await page.reset();
+      const wide = await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        return document.getElementById('inspector').textContent.indexOf('Text') >= 0 &&
+          !!document.querySelector('#inspector [data-k="rot"]');
+      })()`);
+      assert.eq(wide, true, 'a wide screen has room, so its one sidebar still shows the selection as before');
     });
 
     t.check('the desktop layout comes back on a wide window', async () => {

@@ -156,6 +156,24 @@ column and becomes a sheet that slides up over the stage, toggled by `#panelBtn`
 phone** — it is the only place most controls exist, which is what the earlier
 breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
 
+**On a phone, `#panelBtn` and its sheet (`#side`) mean the whole project, never a
+selected element.** `buildInspector()` only puts `inspectorForEl(el)` into
+`#inspector` when `!narrow()`; on a phone `#inspector` is always
+`inspectorForPage()`, whatever is selected. A selected element gets a second,
+independent sheet instead — `#elemDrawer` — that `syncElemDrawer()` shows and hides
+as `selected()` comes and goes, closed (`.elem-peek` only, not `.open`) the moment
+it appears rather than sprung open; tapping `#elemPeek` is the only thing that
+changes `elemDrawerOpen`. Both sheets share the bottom edge, so `body.side-open
+.elem-drawer` pushes the element drawer off screen while `#side` is open rather
+than letting them stack — the two are equivalent bottom-sheet CSS (`transform:
+translateY`, sliding up), just `#elemDrawer`'s closed position leaves its
+`.elem-peek` bar on screen instead of going fully off it. `wireInspector()` takes
+the container to wire as a parameter now, since `#inspector` and `#elemInspector`
+both need it and never share markup (`data-k` and its siblings only ever appear in
+`inspectorForEl`'s output); `syncInspector()` (used mid-drag, so it must not
+rebuild anything) picks between them the same way. On a wide screen `#elemDrawer`
+stays `hidden` and the one sidebar column behaves exactly as it always did.
+
 The title, paper size and the open/save buttons live in the toolbar on a wide
 screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
 the real elements — not clones — into a "Document" group at the top of the sheet
