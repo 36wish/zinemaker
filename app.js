@@ -142,7 +142,6 @@ function save() {
     } catch (err) {
       toast('Browser storage is full — recent changes were not saved.', 5000);
     }
-    updateMeter();
   }, 250);
 }
 
@@ -180,17 +179,6 @@ function fixDoc(d, n) {
       .map(e => Object.assign({}, e, { id: e.id || uid() }));
   }
   return out;
-}
-
-function updateMeter() {
-  const bar = $('#meterFill');
-  if (!bar) return;
-  const bytes = JSON.stringify(state).length * 2;   // UTF-16 in most engines
-  const pct = Math.min(100, bytes / (5 * 1024 * 1024) * 100);
-  bar.style.width = pct.toFixed(1) + '%';
-  bar.parentNode.classList.toggle('hot', pct > 80);
-  const lbl = $('#meterLabel');
-  if (lbl) lbl.textContent = (bytes / 1024 / 1024).toFixed(2) + ' MB of ~5 MB used';
 }
 
 /* ------------------------------------------------------------------ history */
@@ -1021,7 +1009,6 @@ function buildInspector() {
   side.innerHTML = (!narrow() && el) ? inspectorForEl(el) : inspectorForPage();
   wireInspector(side);
   syncElemDrawer();
-  updateMeter();
   paintHelp();
 }
 
@@ -1166,12 +1153,7 @@ function inspectorForPage() {
       '<div class="row">' +
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
         '<div class="seg"><button data-cut="0"' + on(!state.cut) + '>Off</button>' +
-        '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>' +
-
-    '<div class="grp"><h2>Saved in this browser</h2>' +
-      '<div class="hint" id="meterLabel"></div><div class="meter"><i id="meterFill"></i></div>' +
-      '<div class="row" style="margin-top:12px">' +
-      '<button class="grow" data-act="clearAll">Start over</button></div></div>';
+        '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>';
 }
 
 /* ------------------------------------------------------------------- help */
@@ -1335,6 +1317,7 @@ function syncElemDrawer() {
 const MOBILE_SETTINGS = [
   { id: 'title', slot: 'slotTitle' },
   { id: 'paper', slot: 'slotPaper' },
+  { id: 'newZine', slot: 'slotNew' },
   { id: 'openZine', slot: 'slotOpen' },
   { id: 'saveZine', slot: 'slotSave' }
 ];
@@ -1515,14 +1498,16 @@ function wireInspector(side) {
       pushHistory();
       doc().panels[state.active] = blankPanel();
       selId = null; paintAll(); save();
-    } else if (a === 'clearAll') {
-      if (!confirm('Delete this whole zine and start over?')) return;
-      pushHistory();
-      state.docs = { mini: blankDoc(8) };
-      state.active = 0; selId = null;
-      paintAll(); save();
     }
   }));
+}
+
+function newZine() {
+  if (!confirm('Delete this whole zine and start a new one?')) return;
+  pushHistory();
+  state.docs = { mini: blankDoc(8) };
+  state.active = 0; selId = null;
+  paintAll(); save();
 }
 
 /* Keep inspector numbers in step with direct manipulation on the page. */
@@ -1990,6 +1975,7 @@ function init() {
   $('#addImage').addEventListener('click', () => $('#file').click());
   $('#addQr').addEventListener('click', addQr);
   $('#file').addEventListener('change', e => { addImageFiles(e.target.files); e.target.value = ''; });
+  $('#newZine').addEventListener('click', newZine);
   $('#openZine').addEventListener('click', () => $('#zineFile').click());
   $('#saveZine').addEventListener('click', saveZine);
   $('#helpBtn').addEventListener('click', () => setHelp(!helpOpen));

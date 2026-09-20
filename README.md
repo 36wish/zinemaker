@@ -45,9 +45,10 @@ cut-line marker to help lining up the physical fold and cut.
 ### Saving
 
 Everything autosaves to the browser's local storage as you work (about 5 MB
-of budget — a meter in the sidebar tracks usage). To keep a copy or move a
-project between machines, use:
+of budget). To keep a copy or move a project between machines, use:
 
+- **New** — deletes the whole zine and starts a blank one (undo brings it
+  back).
 - **Save** — writes a `.zine` file, a self-contained project file including
   every image. See [`fileformat.md`](fileformat.md) for the exact format.
 - **Open** — loads a `.zine` file, replacing what's on screen (undo brings it
