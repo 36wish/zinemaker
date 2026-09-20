@@ -6,8 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A single-page editor for a **one-sheet zine**: eight panels imposed on one sheet of
 paper that folds into a booklet. Upload images, set text, insert QR codes, export a
-print-ready PDF. There is no flat single-page mode and no single-panel view — the
-editor always shows a spread — and both were removed deliberately.
+print-ready PDF. There is no flat single-page mode — a separate layout that showed
+the whole imposed sheet rather than a spread — and it was removed deliberately.
+The document itself is still always a spread of facing panels; on a phone only,
+`state.singleView` lets the *screen* show just the active one at a time (see
+"Small screens"), which is a display choice `visiblePanels()` makes, not a second
+editing model — `SPREADS`, `IMPOSE` and export never hear about it.
 
 ## Commands
 
@@ -209,7 +213,19 @@ a fit measured to the exact pixel in the forced single-line layout can still
 round the wrong way once `flex-wrap` gets to decide for real, which costs a
 whole line. Runs from the same places as `syncDocSettings()`, after it, since
 moving the document controls out is what the bar's remaining children measure
-against.
+against. **Never measure that overflow with `scrollWidth`** — it is defined as
+never less than `clientWidth`, so once a trial scale shrinks the row below a
+comfortable fit it reads back exactly `clientWidth` no matter how much smaller
+the row actually got, and the loop can never tell it has already succeeded.
+Measure to the last child's own right edge instead, which has no such floor.
+
+On a phone, `#viewToggle` and `setSingleView()` let `state.singleView` show just
+`state.active` instead of its spread — `visiblePanels()` is the only other place
+that reads the flag, and only under `narrow()`, so a wide screen ignores it even
+if it was left on. Persisted like `margin`/`cut`/`guides` (`load()` restores it,
+`save()` writes the whole `state`), but **never written into the `.zine` file** —
+`saveZine()`'s `meta` is an explicit field list and deliberately leaves it out,
+since it is a viewing preference for this screen, not part of the document.
 
 Touch is not just a narrower mouse:
 

@@ -65,6 +65,7 @@ let state = {
   margin: 5,                        // mm of unprintable edge to stay clear of
   cut: true,                        // print a guide along the slit
   guides: false,                    // print dotted panel outlines
+  singleView: false,                // phone only: one panel on screen instead of the spread
   docs: { mini: blankDoc(8) }
 };
 
@@ -102,9 +103,14 @@ let hist = [], future = [];
 const doc = () => state.docs.mini;
 const panel = () => doc().panels[state.active] || doc().panels[0];
 
-/* Which panels are on screen: both halves of the current spread.
-   Everything downstream works off this list rather than state.active alone. */
+/* Which panels are on screen: both halves of the current spread, unless a
+   phone has been asked for just the one — everything downstream (the sheet,
+   its zoom, the labels above it, the spine) works off this list rather than
+   state.active alone, so that one flag is all setSingleView() has to touch.
+   Ignored on a wide screen even if it is set, so resizing back down to a
+   phone with it already on picks up right where it left off. */
 function visiblePanels() {
+  if (narrow() && state.singleView) return [state.active];
   return SPREADS.find(s => s.indexOf(state.active) >= 0) || [state.active];
 }
 
@@ -155,6 +161,7 @@ function load() {
       margin: clampMargin(s.margin == null ? 5 : s.margin),
       cut: s.cut !== false,
       guides: !!s.guides,
+      singleView: !!s.singleView,
       docs: { mini: fixDoc(s.docs.mini, 8) }
     };
     state.active = Math.min(Math.max(0, s.active | 0), doc().panels.length - 1);
@@ -1182,7 +1189,8 @@ function helpHtml() {
     '<p>Each spread shows the two pages that face each other when the zine is ' +
       'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7. Click a page, its ' +
       'label above the sheet, or a thumbnail to make it the page that receives ' +
-      'new items.</p>' +
+      'new items. On a phone, the two-page button in the toolbar switches to one ' +
+      'page at a time, larger, and back.</p>' +
     '<p>Double-click text to edit it, or double-tap it on a touch screen. Paste ' +
       'or drop images straight onto the page, or drop a <b>.zine</b> file to ' +
       'open it.</p>' +
@@ -1247,13 +1255,36 @@ function setHelp(open) {
   syncDocSettings();          // help takes the same spot in the sheet
 }
 
+const narrow = () => window.matchMedia('(max-width: 860px)').matches;
+
+/* --------------------------------------------------------- one page or two
+
+   A spread is two facing panels, which is the whole point on a wide screen
+   — there is room, and folding is easier to picture with both in view. On a
+   phone the two together can be too small to work in, so state.singleView
+   lets it show just the active one instead; visiblePanels() is the only
+   other place that reads it. Persisted like margin/cut/guides, but a wide
+   screen ignores it outright, so it never affects anything there. */
+function setSingleView(v) {
+  state.singleView = !!v;
+  if (!findSel()) selId = null;    // the other half's selection may have left view
+  paintAll(); save(); syncViewToggle();
+}
+
+function syncViewToggle() {
+  const btn = $('#viewToggle');
+  if (!btn) return;
+  btn.classList.toggle('on', state.singleView);
+  btn.setAttribute('aria-pressed', state.singleView ? 'true' : 'false');
+  btn.title = state.singleView ? 'Show both pages of the spread' : 'Show one page at a time';
+}
+
 /* -------------------------------------------------------- the side as a sheet
 
    A phone has no room for a column beside the stage, so under the narrow
    media query the sidebar sits off the bottom of the screen until asked for.
    On a wide screen it is always in view and this toggle changes nothing. */
 let sideOpen = false;
-const narrow = () => window.matchMedia('(max-width: 860px)').matches;
 
 function setSide(open) {
   sideOpen = !!open;
@@ -1343,25 +1374,35 @@ function syncDocSettings() {
    reads back (see the narrow media query). Only ever shrinks; a screen with
    room to spare gets scale 1, same size as always.
 
-   flex-wrap normally absorbs the overflow before scrollWidth would show it,
-   so measuring forces one line with the .measuring class first. A single
-   division isn't exact — fixed borders and glyph widths do not shrink
-   perfectly in step with padding — so this runs a couple of times, each
-   pass correcting for whatever the last one over- or undershot. It aims a
-   couple of pixels under the real budget: a fit measured exactly to the
-   pixel in the forced single-line layout can still round the wrong way
-   once flex-wrap gets to decide for real, and that costs a whole line. */
+   flex-wrap normally absorbs the overflow before it could be measured, so
+   .measuring forces one line first. scrollWidth is no good for that
+   measurement even then: it is defined as never less than clientWidth, so
+   once a trial scale shrinks the row past a comfortable fit it reads back
+   exactly clientWidth regardless of how much smaller the row actually is,
+   and the loop can never tell it has already succeeded. Measuring to the
+   last button's own right edge has no such floor. A single division isn't
+   exact either way — fixed borders and glyph widths do not shrink perfectly
+   in step with padding — so this runs a few times, each pass correcting for
+   whatever the last one over- or undershot. It aims a couple of pixels
+   under the real budget: a fit measured exactly to the pixel in the forced
+   single-line layout can still round the wrong way once flex-wrap gets to
+   decide for real, and that costs a whole line. */
 function fitBar() {
   const bar = $('.bar'), SLACK = 2;
   if (!narrow()) { bar.style.removeProperty('--bar-scale'); return; }
+  const padRight = parseFloat(getComputedStyle(bar).paddingRight) || 0;
   let scale = 1;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 14; i++) {
     bar.style.setProperty('--bar-scale', scale.toFixed(3));
     bar.classList.add('measuring');
-    const need = bar.scrollWidth, have = bar.clientWidth - SLACK;
+    const kids = [...bar.children].filter(c => getComputedStyle(c).display !== 'none');
+    const last = kids[kids.length - 1];
+    const barRect = bar.getBoundingClientRect();
+    const need = last ? last.getBoundingClientRect().right - barRect.left + padRight : 0;
+    const have = barRect.width - SLACK;
     bar.classList.remove('measuring');
-    if (need <= have || scale <= 0.7) break;
-    scale = Math.max(0.7, scale * (have / need));
+    if (need <= have || scale <= 0.55) break;
+    scale = Math.max(0.55, scale * (have / need));
   }
 }
 
@@ -1955,6 +1996,7 @@ function init() {
   $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
   $('#sideClose').addEventListener('click', () => setSide(false));
   $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));
+  $('#viewToggle').addEventListener('click', () => setSingleView(!state.singleView));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
     e.target.value = '';
@@ -2020,6 +2062,7 @@ function init() {
 
   syncDocSettings();          // move title/paper/open/save in if we start narrow
   fitBar();                   // and shrink the rest of the toolbar if it still needs it
+  syncViewToggle();
   syncUndo();
   paintAll();
   save();
