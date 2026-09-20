@@ -78,6 +78,53 @@ module.exports = {
       assert.eq(any, false);
     });
 
+    t.check('trimming before folding reports no clipped edges either', async () => {
+      await page.reset({ margin: 5, trimMargin: true });
+      const any = await page.evaluate('state.docs.mini.panels.some((_, i) => unsafeEdges(i) !== null)');
+      assert.eq(any, false, 'panels are already inset, so none of them should read as clipped');
+    });
+
+    t.check('trimming before folding shrinks and insets the panel grid by the margin', async () => {
+      await page.reset({ margin: 5, trimMargin: true });
+      const g = await page.evaluate('(() => { const g = geom(); return ' +
+        '{ sheetW: g.sheetW, sheetH: g.sheetH, panelW: g.panelW, panelH: g.panelH, ' +
+        'offsetX: g.offsetX, offsetY: g.offsetY, mPt: 5 * PT }; })()');
+      assert.near(g.offsetX, g.mPt, 1e-6, 'the grid is offset by the margin horizontally');
+      assert.near(g.offsetY, g.mPt, 1e-6, 'the grid is offset by the margin vertically');
+      assert.near(g.panelW, (g.sheetW - 2 * g.mPt) / 4, 1e-6, 'panel width shrinks to a quarter of the trimmed sheet');
+      assert.near(g.panelH, (g.sheetH - 2 * g.mPt) / 2, 1e-6, 'panel height shrinks to half of the trimmed sheet');
+    });
+
+    t.check('trimming before folding keeps panels aligned to the trimmed quarter and half lines', async () => {
+      await page.reset({ margin: 5, trimMargin: true, cut: false, guides: false });
+      const r = await page.evaluate(`(async () => {
+        const greys = [16, 48, 80, 112, 144, 176, 208, 232];
+        state.docs.mini.panels.forEach((p, i) => {
+          p.bg = 'rgb(' + greys[i] + ',' + greys[i] + ',' + greys[i] + ')';
+          p.els = [];
+        });
+        const g = geom();
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
+        const ctx = cv.getContext('2d');
+        const ptToPx = 300 / 72;
+        const at = (xPt, yPt) => ctx.getImageData(Math.round(xPt * ptToPx), Math.round(yPt * ptToPx), 1, 1).data[0];
+        // The bottom row (row 1) prints upright: columns 0..3 are panels 6, 7, back, cover.
+        const yMid = g.offsetY + g.panelH * 1.5;
+        const colMid = c => g.offsetX + g.panelW * (c + 0.5);
+        return {
+          margin: at(2, yMid),
+          col0: at(colMid(0), yMid), col1: at(colMid(1), yMid),
+          col2: at(colMid(2), yMid), col3: at(colMid(3), yMid)
+        };
+      })()`);
+      assert.eq(r.margin, 255, 'the inset band should still be blank white, not panel colour');
+      // panels 6, 7, back, cover are indices 5, 6, 7, 0
+      assert.eq(r.col0, 176, 'column 0 should show panel 6');
+      assert.eq(r.col1, 208, 'column 1 should show panel 7');
+      assert.eq(r.col2, 232, 'column 2 should show the back panel');
+      assert.eq(r.col3, 16, 'column 3 should show the cover');
+    });
+
     t.check('full-bleed artwork is clipped at exactly the margin, all four sides', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(async () => {
