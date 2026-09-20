@@ -66,6 +66,7 @@ let state = {
   trimMargin: false,                // trim that edge off after printing, for an edge-to-edge zine
   cut: true,                        // print a guide along the slit
   guides: false,                    // print dotted panel outlines
+  singleView: false,                // phone only: one panel on screen instead of the spread
   docs: { mini: blankDoc(8) }
 };
 
@@ -105,9 +106,14 @@ let hist = [], future = [];
 const doc = () => state.docs.mini;
 const panel = () => doc().panels[state.active] || doc().panels[0];
 
-/* Which panels are on screen: both halves of the current spread.
-   Everything downstream works off this list rather than state.active alone. */
+/* Which panels are on screen: both halves of the current spread, unless a
+   phone has been asked for just the one — everything downstream (the sheet,
+   its zoom, the labels above it, the spine) works off this list rather than
+   state.active alone, so that one flag is all setSingleView() has to touch.
+   Ignored on a wide screen even if it is set, so resizing back down to a
+   phone with it already on picks up right where it left off. */
 function visiblePanels() {
+  if (narrow() && state.singleView) return [state.active];
   return SPREADS.find(s => s.indexOf(state.active) >= 0) || [state.active];
 }
 
@@ -150,7 +156,6 @@ function save() {
     } catch (err) {
       toast('Browser storage is full — recent changes were not saved.', 5000);
     }
-    updateMeter();
   }, 250);
 }
 
@@ -170,6 +175,7 @@ function load() {
       trimMargin: !!s.trimMargin,
       cut: s.cut !== false,
       guides: !!s.guides,
+      singleView: !!s.singleView,
       docs: { mini: fixDoc(s.docs.mini, 8) }
     };
     state.active = Math.min(Math.max(0, s.active | 0), doc().panels.length - 1);
@@ -188,17 +194,6 @@ function fixDoc(d, n) {
       .map(e => Object.assign({}, e, { id: e.id || uid() }));
   }
   return out;
-}
-
-function updateMeter() {
-  const bar = $('#meterFill');
-  if (!bar) return;
-  const bytes = JSON.stringify(state).length * 2;   // UTF-16 in most engines
-  const pct = Math.min(100, bytes / (5 * 1024 * 1024) * 100);
-  bar.style.width = pct.toFixed(1) + '%';
-  bar.parentNode.classList.toggle('hot', pct > 80);
-  const lbl = $('#meterLabel');
-  if (lbl) lbl.textContent = (bytes / 1024 / 1024).toFixed(2) + ' MB of ~5 MB used';
 }
 
 /* ------------------------------------------------------------------ history */
@@ -680,12 +675,20 @@ function setActive(pi) {
   paintAll(); save();
 }
 
+/* The thumbnails, the page labels and the stage padding all change height
+   with the viewport, so measure them rather than assuming a desktop window.
+   Falls back to the desktop figures for the first paint, before the strip
+   exists; paintStrip() calls this again once it does. */
 function fitZoom() {
   const g = geom(), stage = $('#stage'), sheet = $('#sheet');
   const cols = visiblePanels().length;
-  const stripH = 96;
-  const availW = stage.clientWidth - 44;
-  const availH = stage.clientHeight - stripH - 52;
+  const cs = getComputedStyle(stage);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const stripH = $('#strip').offsetHeight || 96;
+  const labelH = $('#sheetLabels').offsetHeight || 22;
+  const availW = stage.clientWidth - padX - 4;
+  const availH = stage.clientHeight - padY - stripH - labelH - 10;
   const z = Math.max(0.15, Math.min(availW / (g.panelW * cols), availH / g.panelH, 2.6));
   curZoom = z;
   sheet.style.transform = 'scale(' + z + ')';
@@ -697,7 +700,7 @@ function fitZoom() {
 
 function paintStrip() {
   const strip = $('#strip'), g = geom();
-  const tz = 58 / g.panelH;
+  const tz = (narrow() ? 46 : 58) / g.panelH;   // all eight have to fit a phone
   const shown = visiblePanels();
   strip.textContent = '';
   doc().panels.forEach((p, i) => {
@@ -722,6 +725,7 @@ function paintStrip() {
     b.addEventListener('click', () => setActive(i));
     strip.appendChild(b);
   });
+  fitZoom();                 // the strip's height is part of the sheet's budget
 }
 
 /* Thumbnails redraw every panel, so coalesce bursts (typing, dragging). */
@@ -824,13 +828,17 @@ function anchorFix(el, dw, dh) {
 
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
+let dragging = false;
 function drag(ev, onMove) {
   const snap = JSON.stringify(state.docs);
   let moved = false;
+  dragging = true;
   const move = e => {
+    if (e.pointerId !== ev.pointerId) return;   // a second finger is not this drag
     e.preventDefault();
     if (!moved) {
       moved = true;
+      lastTap.id = null;            // a gesture that moved is not half a tap
       hist.push(snap);
       if (hist.length > 10) hist.shift();
       future.length = 0;
@@ -838,17 +846,36 @@ function drag(ev, onMove) {
     }
     onMove(e);
   };
-  const up = () => {
+  /* pointercancel as well as pointerup: a touch the browser takes back — a
+     second finger, a system gesture — never sends an up, and the listeners
+     would outlive the gesture. */
+  const up = e => {
+    if (e && e.pointerId !== ev.pointerId) return;
+    dragging = false;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
     if (moved) { paintStripSoon(); syncInspector(); save(); }
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+/* A touch drag has to be cancelled for the element to move at all, and that
+   cancels the synthesised dblclick with it, so touch gets its own double-tap
+   detector. Mouse users keep the real dblclick handler. */
+let lastTap = { id: null, t: 0 };
+function doubleTapped(id, ev) {
+  if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return false;
+  const now = Date.now();
+  const again = lastTap.id === id && now - lastTap.t < 400;
+  lastTap = { id: again ? null : id, t: now };
+  return again;
 }
 
 function onPagePointerDown(ev) {
-  if (ev.button !== 0) return;
+  if (ev.button !== 0 || dragging) return;
   const handle = ev.target.closest('.h');
   const hit = ev.target.closest('.el');
   const pd = ev.target.closest('.panel');
@@ -863,6 +890,11 @@ function onPagePointerDown(ev) {
   const el = selected();
   const node = nodes.get(id);
   if (!el || !node) return;
+
+  if (!handle && el.type === 'text' && doubleTapped(id, ev)) {
+    startEdit(id, false);
+    return;
+  }
 
   if (handle && handle.classList.contains('rot')) {
     const r = node.parentNode.getBoundingClientRect();
@@ -927,6 +959,8 @@ function onKey(e) {
   }
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSel(); return; }
   if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
+  if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
+  if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
   if (e.key === 'Escape') { select(null); return; }
   const el = selected();
   if (!el) return;
@@ -996,11 +1030,16 @@ function foldDiagram() {
     '</text></svg>';
 }
 
+/* On a phone the settings button means the whole project, full stop, so the
+   sheet it opens never switches to a selected element's own controls — see
+   syncElemDrawer() for where those go instead. On a wide screen there is no
+   such button and no elem-drawer; the one sidebar column still shows
+   whichever is relevant, as it always has. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
-  side.innerHTML = el ? inspectorForEl(el) : inspectorForPage();
-  wireInspector();
-  updateMeter();
+  side.innerHTML = (!narrow() && el) ? inspectorForEl(el) : inspectorForPage();
+  wireInspector(side);
+  syncElemDrawer();
   paintHelp();
 }
 
@@ -1154,12 +1193,7 @@ function inspectorForPage() {
       '<div class="row">' +
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
         '<div class="seg"><button data-cut="0"' + on(!state.cut) + '>Off</button>' +
-        '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>' +
-
-    '<div class="grp"><h2>Saved in this browser</h2>' +
-      '<div class="hint" id="meterLabel"></div><div class="meter"><i id="meterFill"></i></div>' +
-      '<div class="row" style="margin-top:12px">' +
-      '<button class="grow" data-act="clearAll">Start over</button></div></div>';
+        '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>';
 }
 
 /* ------------------------------------------------------------------- help */
@@ -1177,9 +1211,11 @@ function helpHtml() {
     '<p>Each spread shows the two pages that face each other when the zine is ' +
       'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7. Click a page, its ' +
       'label above the sheet, or a thumbnail to make it the page that receives ' +
-      'new items.</p>' +
-    '<p>Double-click text to edit it. Paste or drop images straight onto the ' +
-      'page, or drop a <b>.zine</b> file to open it.</p>' +
+      'new items. On a phone, the two-page button in the toolbar switches to one ' +
+      'page at a time, larger, and back.</p>' +
+    '<p>Double-click text to edit it, or double-tap it on a touch screen. Paste ' +
+      'or drop images straight onto the page, or drop a <b>.zine</b> file to ' +
+      'open it.</p>' +
     '<p><kbd>Del</kbd> removes &nbsp; <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates &nbsp; ' +
       '<kbd>&larr;&uarr;&darr;&rarr;</kbd> nudge, with <kbd>Shift</kbd> &times;10. ' +
       '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
@@ -1248,6 +1284,160 @@ function setHelp(open) {
   btn.classList.toggle('on', helpOpen);
   btn.setAttribute('aria-pressed', helpOpen ? 'true' : 'false');
   paintHelp();
+  if (helpOpen && narrow()) setSide(true);     // nowhere else for it to appear
+  syncDocSettings();          // help takes the same spot in the sheet
+}
+
+const narrow = () => window.matchMedia('(max-width: 860px)').matches;
+
+/* --------------------------------------------------------- one page or two
+
+   A spread is two facing panels, which is the whole point on a wide screen
+   — there is room, and folding is easier to picture with both in view. On a
+   phone the two together can be too small to work in, so state.singleView
+   lets it show just the active one instead; visiblePanels() is the only
+   other place that reads it. Persisted like margin/cut/guides, but a wide
+   screen ignores it outright, so it never affects anything there. */
+function setSingleView(v) {
+  state.singleView = !!v;
+  if (!findSel()) selId = null;    // the other half's selection may have left view
+  paintAll(); save(); syncViewToggle();
+}
+
+function syncViewToggle() {
+  const btn = $('#viewToggle');
+  if (!btn) return;
+  btn.classList.toggle('on', state.singleView);
+  btn.setAttribute('aria-pressed', state.singleView ? 'true' : 'false');
+  btn.title = state.singleView ? 'Show both pages of the spread' : 'Show one page at a time';
+}
+
+/* -------------------------------------------------------- the side as a sheet
+
+   A phone has no room for a column beside the stage, so under the narrow
+   media query the sidebar sits off the bottom of the screen until asked for.
+   On a wide screen it is always in view and this toggle changes nothing. */
+let sideOpen = false;
+
+function setSide(open) {
+  sideOpen = !!open;
+  document.body.classList.toggle('side-open', sideOpen);
+  $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
+  $('#panelBtn').classList.toggle('on', sideOpen);
+}
+
+/* ---------------------------------------------------- the element's drawer
+
+   A second sheet, independent of #side: the settings button is the whole
+   project's, never a selected element's, so a selection gets its own bar
+   instead of borrowing that one. It appears — closed, as a peeking bar —
+   the instant something becomes selected, and disappears the instant
+   nothing is. Opening it is a separate choice, left up to whoever wants it. */
+let elemDrawerOpen = false;
+
+function setElemDrawer(open) {
+  elemDrawerOpen = !!open;
+  $('#elemDrawer').classList.toggle('open', elemDrawerOpen);
+  $('#elemPeek').setAttribute('aria-expanded', elemDrawerOpen ? 'true' : 'false');
+}
+
+const elemLabel = el => el.type === 'text' ? 'Text' : el.type === 'qr' ? 'QR code' : 'Image';
+
+function syncElemDrawer() {
+  const el = selected(), drawer = $('#elemDrawer');
+  const show = narrow() && !!el;
+  const wasShown = !drawer.hidden;
+  drawer.hidden = !show;
+  if (!show) {
+    if (wasShown) setElemDrawer(false);     // closed again, ready for next time
+    return;
+  }
+  if (!wasShown) setElemDrawer(false);      // just appeared: start closed, not sprung open
+  $('#elemPeekLabel').textContent = elemLabel(el);
+  $('#elemInspector').innerHTML = inspectorForEl(el);
+  wireInspector($('#elemInspector'));
+}
+
+/* The title, paper size and file buttons live in the toolbar on a wide
+   screen, where there is room for them; a phone has none, so they park in
+   a "Document" group at the top of the settings sheet instead. Moving the
+   real elements (rather than cloning them and syncing two copies) keeps
+   their listeners and values automatically correct wherever they are. A
+   comment node dropped in front of each one on first use marks where it
+   came from, so putting it back is just `marker.after(el)`. */
+const MOBILE_SETTINGS = [
+  { id: 'title', slot: 'slotTitle' },
+  { id: 'paper', slot: 'slotPaper' },
+  { id: 'newZine', slot: 'slotNew' },
+  { id: 'openZine', slot: 'slotOpen' },
+  { id: 'saveZine', slot: 'slotSave' }
+];
+let mobileAnchors = null, mobileControlsIn = false;
+
+function captureMobileAnchors() {
+  mobileAnchors = MOBILE_SETTINGS.map(m => {
+    const el = $('#' + m.id);
+    const marker = document.createComment(m.id);
+    el.parentNode.insertBefore(marker, el);
+    return { el: el, marker: marker, slot: m.slot };
+  });
+}
+
+function layoutMobileControls() {
+  if (!mobileAnchors) captureMobileAnchors();
+  const wantIn = narrow();
+  if (wantIn === mobileControlsIn) return;      // already where it should be
+  mobileControlsIn = wantIn;
+  mobileAnchors.forEach(a => {
+    if (wantIn) $('#' + a.slot).appendChild(a.el);
+    else a.marker.after(a.el);
+  });
+}
+
+/* Help takes over the same sheet, so the document group hides while help is
+   open rather than fighting it for space. */
+function syncDocSettings() {
+  layoutMobileControls();
+  $('#docSettings').hidden = !(narrow() && !helpOpen);
+}
+
+/* On a wide screen the toolbar always has room; on a phone it might not,
+   and no fixed breakpoint covers every handset. So rather than letting the
+   row wrap — which costs a whole second line of stage — shrink the buttons
+   by just enough to fit one, via the --bar-scale custom property the CSS
+   reads back (see the narrow media query). Only ever shrinks; a screen with
+   room to spare gets scale 1, same size as always.
+
+   flex-wrap normally absorbs the overflow before it could be measured, so
+   .measuring forces one line first. scrollWidth is no good for that
+   measurement even then: it is defined as never less than clientWidth, so
+   once a trial scale shrinks the row past a comfortable fit it reads back
+   exactly clientWidth regardless of how much smaller the row actually is,
+   and the loop can never tell it has already succeeded. Measuring to the
+   last button's own right edge has no such floor. A single division isn't
+   exact either way — fixed borders and glyph widths do not shrink perfectly
+   in step with padding — so this runs a few times, each pass correcting for
+   whatever the last one over- or undershot. It aims a couple of pixels
+   under the real budget: a fit measured exactly to the pixel in the forced
+   single-line layout can still round the wrong way once flex-wrap gets to
+   decide for real, and that costs a whole line. */
+function fitBar() {
+  const bar = $('.bar'), SLACK = 2;
+  if (!narrow()) { bar.style.removeProperty('--bar-scale'); return; }
+  const padRight = parseFloat(getComputedStyle(bar).paddingRight) || 0;
+  let scale = 1;
+  for (let i = 0; i < 14; i++) {
+    bar.style.setProperty('--bar-scale', scale.toFixed(3));
+    bar.classList.add('measuring');
+    const kids = [...bar.children].filter(c => getComputedStyle(c).display !== 'none');
+    const last = kids[kids.length - 1];
+    const barRect = bar.getBoundingClientRect();
+    const need = last ? last.getBoundingClientRect().right - barRect.left + padRight : 0;
+    const have = barRect.width - SLACK;
+    bar.classList.remove('measuring');
+    if (need <= have || scale <= 0.55) break;
+    scale = Math.max(0.55, scale * (have / need));
+  }
 }
 
 const mm = pt => (pt / PT).toFixed(1);
@@ -1296,9 +1486,11 @@ function marginNote() {
     'before folding, for an edge-to-edge result.';
 }
 
-function wireInspector() {
-  const side = $('#inspector');
-
+/* Shared between #inspector and, on a phone, #elemInspector — each only
+   ever holds markup relevant to itself (data-k and friends are exclusive to
+   inspectorForEl's output, the rest to inspectorForPage's), so wiring both
+   from the same set of selectors is safe. */
+function wireInspector(side) {
   side.querySelectorAll('[data-k]').forEach(node => {
     const k = node.dataset.k;
     const num = node.hasAttribute('data-num');
@@ -1384,23 +1576,27 @@ function wireInspector() {
       pushHistory();
       doc().panels[state.active] = blankPanel();
       selId = null; paintAll(); save();
-    } else if (a === 'clearAll') {
-      if (!confirm('Delete this whole zine and start over?')) return;
-      pushHistory();
-      state.docs = { mini: blankDoc(8) };
-      state.title = 'untitled zine';
-      state.active = 0; selId = null;
-      $('#title').value = state.title;
-      paintAll(); save();
     }
   }));
+}
+
+function newZine() {
+  if (!confirm('Delete this whole zine and start a new one?')) return;
+  pushHistory();
+  state.docs = { mini: blankDoc(8) };
+  state.title = 'untitled zine';
+  state.active = 0; selId = null;
+  $('#title').value = state.title;
+  paintAll(); save();
 }
 
 /* Keep inspector numbers in step with direct manipulation on the page. */
 function syncInspector() {
   const el = selected();
   if (!el) return;
-  $('#inspector').querySelectorAll('[data-k]').forEach(node => {
+  // A phone keeps the element's own fields in #elemInspector, never #inspector.
+  const side = narrow() ? $('#elemInspector') : $('#inspector');
+  side.querySelectorAll('[data-k]').forEach(node => {
     if (node.tagName === 'BUTTON' || node === document.activeElement) return;
     const v = el[node.dataset.k];
     if (v != null && node.value !== String(v)) node.value = v;
@@ -1858,6 +2054,16 @@ function seed() {
   });
 }
 
+function openExportMenu() {
+  $('#exportMenu').hidden = false;
+  $('#exportMenuBtn').setAttribute('aria-expanded', 'true');
+}
+
+function closeExportMenu() {
+  $('#exportMenu').hidden = true;
+  $('#exportMenuBtn').setAttribute('aria-expanded', 'false');
+}
+
 function init() {
   if (!load()) seed();
 
@@ -1869,9 +2075,14 @@ function init() {
   $('#addImage').addEventListener('click', () => $('#file').click());
   $('#addQr').addEventListener('click', addQr);
   $('#file').addEventListener('change', e => { addImageFiles(e.target.files); e.target.value = ''; });
+  $('#newZine').addEventListener('click', newZine);
   $('#openZine').addEventListener('click', () => $('#zineFile').click());
   $('#saveZine').addEventListener('click', saveZine);
   $('#helpBtn').addEventListener('click', () => setHelp(!helpOpen));
+  $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
+  $('#sideClose').addEventListener('click', () => setSide(false));
+  $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));
+  $('#viewToggle').addEventListener('click', () => setSingleView(!state.singleView));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
     e.target.value = '';
@@ -1879,7 +2090,15 @@ function init() {
   $('#undo').addEventListener('click', undo);
   $('#redo').addEventListener('click', redo);
   $('#exportPdf').addEventListener('click', () => exportSheet('pdf'));
-  $('#exportPng').addEventListener('click', () => exportSheet('png'));
+  $('#exportPng').addEventListener('click', () => { exportSheet('png'); closeExportMenu(); });
+  $('#exportMenuBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    $('#exportMenu').hidden ? openExportMenu() : closeExportMenu();
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.split')) closeExportMenu();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeExportMenu(); });
 
   $('#paper').addEventListener('change', e => {
     state.paper = e.target.value;
@@ -1896,7 +2115,14 @@ function init() {
     }
   });
   document.addEventListener('keydown', onKey);
-  window.addEventListener('resize', fitZoom);
+  // The thumbnails size themselves to the layout, the document controls move
+  // between the toolbar and the settings sheet, the toolbar's own buttons
+  // may need to shrink or return to size, and which sheet a selection's
+  // controls live in depends on the same breakpoint — a resize can change
+  // any of that, not just the zoom.
+  window.addEventListener('resize', () => {
+    fitZoom(); paintStripSoon(); syncDocSettings(); fitBar(); buildInspector();
+  });
 
   const stage = $('#stage');
   let dragDepth = 0;
@@ -1920,6 +2146,9 @@ function init() {
     if (files.length) { e.preventDefault(); addImageFiles(files); }
   });
 
+  syncDocSettings();          // move title/paper/open/save in if we start narrow
+  fitBar();                   // and shrink the rest of the toolbar if it still needs it
+  syncViewToggle();
   syncUndo();
   paintAll();
   save();

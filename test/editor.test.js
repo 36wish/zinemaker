@@ -402,8 +402,7 @@ module.exports = {
       const r = await page.evaluate(`(() => {
         $('#title').value = 'my great zine'; state.title = 'my great zine';
         setActive(2); addText(); stopEdit();
-        select(null); buildInspector();
-        document.querySelector('[data-act="clearAll"]').click();
+        document.querySelector('#newZine').click();
         return { stateTitle: state.title, inputValue: $('#title').value,
                  panelEmpty: doc().panels[2].els.length === 0 };
       })()`);

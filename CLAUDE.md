@@ -6,8 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A single-page editor for a **one-sheet zine**: eight panels imposed on one sheet of
 paper that folds into a booklet. Upload images, set text, insert QR codes, export a
-print-ready PDF. There is no flat single-page mode and no single-panel view — the
-editor always shows a spread — and both were removed deliberately.
+print-ready PDF. There is no flat single-page mode — a separate layout that showed
+the whole imposed sheet rather than a spread — and it was removed deliberately.
+The document itself is still always a spread of facing panels; on a phone only,
+`state.singleView` lets the *screen* show just the active one at a time (see
+"Small screens"), which is a display choice `visiblePanels()` makes, not a second
+editing model — `SPREADS`, `IMPOSE` and export never hear about it.
 
 ## Commands
 
@@ -47,10 +51,14 @@ than reimplementing it.
 | `editor.test.js` | elements, spread selection, synthesised drag/rotate gestures, templates, undo |
 | `print.test.js` | imposition, margins and guides, measured off the 300 dpi raster |
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
+| `mobile.test.js` | the phone layout, measured on an emulated handset |
 | `pages.test.js` | the site served over HTTP from a project subpath |
 
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
-so a test that skips it will inherit the previous one's document.
+so a test that skips it will inherit the previous one's document. The same goes for
+the viewport: `page.emulate(w, h)` puts the shared window into a handset — size,
+pixel ratio and a touch screen, so `pointer: coarse` resolves — and whoever calls it
+owes a `page.unemulate()` in their teardown.
 
 Two habits worth keeping. **Measure, do not eyeball** — panel seams, rim clipping and
 PDF offsets have all been wrong at some point, and only pixel or byte measurement
@@ -142,6 +150,99 @@ Two invariants worth knowing before touching it:
 - Selection may live in either half of a spread, so look elements up with
   `findSel()` / `elById()` rather than assuming `state.active`. Mutating actions use
   `selPanel()`, not `panel()`.
+
+### Small screens
+
+One breakpoint, `max-width: 860px`, and `narrow()` in `app.js` reads the same query
+so the script and the stylesheet cannot disagree. Under it the sidebar stops being a
+column and becomes a sheet that slides up over the stage, toggled by `#panelBtn` and
+`setSide()`; `body.side-open` is the only state. **Never hide the inspector on a
+phone** — it is the only place most controls exist, which is what the earlier
+breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
+
+**On a phone, `#panelBtn` and its sheet (`#side`) mean the whole project, never a
+selected element.** `buildInspector()` only puts `inspectorForEl(el)` into
+`#inspector` when `!narrow()`; on a phone `#inspector` is always
+`inspectorForPage()`, whatever is selected. A selected element gets a second,
+independent sheet instead — `#elemDrawer` — that `syncElemDrawer()` shows and hides
+as `selected()` comes and goes, closed (`.elem-peek` only, not `.open`) the moment
+it appears rather than sprung open; tapping `#elemPeek` is the only thing that
+changes `elemDrawerOpen`. Both sheets share the bottom edge, so `body.side-open
+.elem-drawer` pushes the element drawer off screen while `#side` is open rather
+than letting them stack — the two are equivalent bottom-sheet CSS (`transform:
+translateY`, sliding up), just `#elemDrawer`'s closed position leaves its
+`.elem-peek` bar on screen instead of going fully off it. `wireInspector()` takes
+the container to wire as a parameter now, since `#inspector` and `#elemInspector`
+both need it and never share markup (`data-k` and its siblings only ever appear in
+`inspectorForEl`'s output); `syncInspector()` (used mid-drag, so it must not
+rebuild anything) picks between them the same way. On a wide screen `#elemDrawer`
+stays `hidden` and the one sidebar column behaves exactly as it always did.
+
+The title, paper size and the open/save buttons live in the toolbar on a wide
+screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
+the real elements — not clones — into a "Document" group at the top of the sheet
+(`#docSettings`, with `#slotTitle`/`#slotPaper`/`#slotOpen`/`#slotSave` as the
+landing spots). `captureMobileAnchors()` drops a comment node in front of each one
+the first time it runs, so `layoutMobileControls()` can put it back with
+`marker.after(el)` on a wide screen; nothing is cloned, so there is no second copy
+to keep in sync. `syncDocSettings()` drives both the move and `#docSettings`'
+visibility, and hides that whole group while help is open rather than moving
+anything — help and the document group share the one sheet. It runs from `init()`,
+from `setHelp()`, and from the `resize` handler, so crossing the breakpoint either
+way sorts itself out. **Scope any CSS aimed at the toolbar's copy of these
+elements to `.bar`** (e.g. `.bar #title`), because an ID selector still matches
+them after they move.
+
+What is left in the toolbar (the icon buttons and the export split) still has to
+fit one row on any phone, not just the ones a breakpoint was written for, so
+`fitBar()` in `app.js` shrinks it by however much that width actually needs
+rather than by a fixed step. It writes a `--bar-scale` custom property that the
+narrow media query's `calc()` rules read back for padding, icon size, gap and
+the two remaining text buttons' font size; a wide screen never sets it, so
+`var(--bar-scale, 1)` falls back to full size everywhere. Measuring the overflow
+takes a `.measuring` class that forces one line — `flex-wrap` normally absorbs
+it before `scrollWidth` would ever show it, and `overflow: hidden` plus
+`flex-shrink: 0` on the children are both needed too, or the browser quietly
+shrinks or hides the same overflow instead of reporting it. **`.bar` needs
+`min-width: 0`** — a flex/grid item's own minimum otherwise defaults to its
+content's, so unshrinkable children could grow the toolbar's own grid track
+past the window instead of ever registering as overflow. Division from one
+measurement isn't exact (borders and glyphs do not shrink in step with
+padding), so it loops a few times, and aims a couple of pixels under budget —
+a fit measured to the exact pixel in the forced single-line layout can still
+round the wrong way once `flex-wrap` gets to decide for real, which costs a
+whole line. Runs from the same places as `syncDocSettings()`, after it, since
+moving the document controls out is what the bar's remaining children measure
+against. **Never measure that overflow with `scrollWidth`** — it is defined as
+never less than `clientWidth`, so once a trial scale shrinks the row below a
+comfortable fit it reads back exactly `clientWidth` no matter how much smaller
+the row actually got, and the loop can never tell it has already succeeded.
+Measure to the last child's own right edge instead, which has no such floor.
+
+On a phone, `#viewToggle` and `setSingleView()` let `state.singleView` show just
+`state.active` instead of its spread — `visiblePanels()` is the only other place
+that reads the flag, and only under `narrow()`, so a wide screen ignores it even
+if it was left on. Persisted like `margin`/`cut`/`guides` (`load()` restores it,
+`save()` writes the whole `state`), but **never written into the `.zine` file** —
+`saveZine()`'s `meta` is an explicit field list and deliberately leaves it out,
+since it is a viewing preference for this screen, not part of the document.
+
+Touch is not just a narrower mouse:
+
+- `.sheet .el { touch-action: none }` — without it the browser claims the drag for
+  scrolling and the element never moves. Bare panel keeps the default, so a drag on
+  empty paper still scrolls the stage.
+- Cancelling that drag cancels the synthesised `dblclick` with it, so
+  `doubleTapped()` recognises a double tap on text for `pointerType` touch and pen.
+  The mouse, and the test suite's own gestures, keep the real `dblclick`.
+- `@media (pointer: coarse)` grows the hit areas, the selection handles included —
+  they counter-scale with `--iz`, so those sizes are screen pixels.
+- Form controls go to 16px on a narrow screen, below which iOS zooms the whole page
+  in when one takes focus.
+
+`fitZoom()` measures the strip, the labels and the stage padding rather than
+assuming a desktop window, and `paintStrip()` calls it once the thumbnails exist,
+since their height is part of the sheet's budget.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.
