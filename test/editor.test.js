@@ -158,8 +158,37 @@ module.exports = {
        'No trimming is needed', 'Print at 100%', 'nudge'].forEach(phrase => {
         assert.ok(r.help.indexOf(phrase) >= 0, 'help is missing: ' + phrase);
       });
-      assert.ok(r.pageText.indexOf('Layout') >= 0 && r.pageText.indexOf('Printer margin') >= 0,
-        'the controls themselves must stay in the inspector');
+      assert.ok(r.pageText.indexOf('Layout') >= 0, 'the page controls themselves must stay in the inspector');
+      assert.eq(r.pageText.indexOf('Printer margin') < 0, true,
+        'project controls now stay behind the settings button, not mixed into the page view');
+    });
+
+    t.check('panel dimensions live in project settings, by the trim controls, not the page panel', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        select(null); setActive(0); buildInspector();
+        const pageText = document.getElementById('inspector').textContent;
+        setSide(true);
+        const projectText = document.getElementById('inspector').textContent;
+        return { pageText: pageText, projectText: projectText };
+      })()`);
+      assert.eq(/mm/.test(r.pageText), false, 'the page panel should no longer mention panel dimensions');
+      assert.ok(/Each panel prints .*mm/.test(r.projectText),
+        'the printer-margin section should state the panel size, got: ' + r.projectText);
+    });
+
+    t.check('the panel dimensions in project settings track the trim setting', async () => {
+      await page.reset({ margin: 10, trimMargin: false });
+      const dims = t => /Each panel prints ([^.]*)\./.exec(t)[1];
+      const r = await page.evaluate(`(() => {
+        setSide(true);
+        const before = document.getElementById('inspector').textContent;
+        state.trimMargin = true; paintAll();
+        const after = document.getElementById('inspector').textContent;
+        return { before: before, after: after };
+      })()`);
+      assert.ok(dims(r.before) !== dims(r.after),
+        'turning trim on shrinks the panel, so the stated size should change too');
     });
 
     t.check('help describes the panel in front of you', async () => {

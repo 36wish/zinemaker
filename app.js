@@ -1043,16 +1043,17 @@ function foldDiagram() {
     '</text></svg>';
 }
 
-/* On a phone the settings button means the whole project, full stop — "This
-   page" (panel colour, layout, clear panel) lives in its own bottom tab
-   instead, shown whenever nothing is selected (see syncPageDrawer()), and a
-   selected element gets a third, mutually exclusive tab of its own (see
-   syncElemDrawer()). On a wide screen there is no such button and no
-   drawers; the one sidebar column shows page and project settings together
-   when nothing is selected, exactly as it always has. */
+/* The settings button means the whole project, full stop, on any width —
+   "This page" (panel colour, layout, clear panel) only ever shows when
+   nothing is selected, and a selection always gets its own view. A phone
+   gets there with two extra tabs (see syncPageDrawer() / syncElemDrawer());
+   a wide screen has only the one sidebar column, so sideOpen — the settings
+   button's own toggle, not just a phone sheet's open/shut state — decides
+   which of the three that column is showing. setSide() rebuilds whenever it
+   flips, so pressing the button swaps the column in place. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
-  side.innerHTML = narrow() ? projectSectionHtml() : (el ? inspectorForEl(el) : inspectorForPage());
+  side.innerHTML = (narrow() || sideOpen) ? projectSectionHtml() : (el ? inspectorForEl(el) : pageSectionHtml());
   wireInspector(side);
   syncElemDrawer();
   syncPageDrawer();
@@ -1174,19 +1175,16 @@ function templateThumb(tpl) {
   return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + r + '</svg>';
 }
 
-/* Split so a phone can put "This page" in its own bottom tab (see
-   syncPageDrawer()) while "Whole project" stays behind the settings button
-   — inspectorForPage() just concatenates the two, which is exactly what a
-   wide screen's single sidebar column still wants when nothing is
-   selected. */
+/* Split so "This page" and "Whole project" can show independently — a phone
+   puts them in separate bottom tabs (see syncPageDrawer() / settings button),
+   and a wide screen's single sidebar column shows exactly one of them (or a
+   selection) at a time too now; see buildInspector(). */
 function pageSectionHtml() {
-  const g = geom();
   return '<div class="side-section">This page<small>Panel ' + (state.active + 1) + ' of 8' +
       (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</small></div>' +
 
     '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
-      '<input type="color" data-page="bg" value="' + panel().bg + '"></div>' +
-      '<div class="hint" style="margin-top:10px">' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm</div></div>' +
+      '<input type="color" data-page="bg" value="' + panel().bg + '"></div></div>' +
 
     '<div class="grp"><h2>Layout</h2><div class="tpl-grid">' +
       TEMPLATES.map((t, i) => '<button class="tpl" data-tpl="' + i + '" title="Apply &quot;' +
@@ -1198,6 +1196,7 @@ function pageSectionHtml() {
 }
 
 function projectSectionHtml() {
+  const g = geom();
   return '<div class="side-section">Whole project<small>Same on every page</small></div>' +
 
     '<div class="grp"><h2>Printer margin</h2>' +
@@ -1209,10 +1208,11 @@ function projectSectionHtml() {
         '<label class="f" style="margin:0;flex:1">After printing</label>' +
         '<div class="seg"><button data-trim="0"' + on(!state.trimMargin) + '>Leave border</button>' +
         '<button data-trim="1"' + on(state.trimMargin) + '>Trim it off</button></div></div>' +
+      '<div class="hint">Each panel prints ' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm.' +
       (state.trimMargin && state.margin > 0
-        ? '<div class="hint">A cut line prints ' + state.margin + ' mm in from the sheet ' +
-          'edge &mdash; cut along it before folding.</div>'
-        : '') +
+        ? ' A cut line prints ' + state.margin + ' mm in from the sheet ' +
+          'edge &mdash; cut along it before folding.'
+        : '') + '</div>' +
     '</div>' +
 
     '<div class="grp"><h2>Print guides</h2>' +
@@ -1224,10 +1224,6 @@ function projectSectionHtml() {
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
         '<div class="seg"><button data-cut="0"' + on(!state.cut) + '>Off</button>' +
         '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>';
-}
-
-function inspectorForPage() {
-  return pageSectionHtml() + projectSectionHtml();
 }
 
 /* ------------------------------------------------------------------- help */
@@ -1349,8 +1345,13 @@ function syncViewToggle() {
 /* -------------------------------------------------------- the side as a sheet
 
    A phone has no room for a column beside the stage, so under the narrow
-   media query the sidebar sits off the bottom of the screen until asked for.
-   On a wide screen it is always in view and this toggle changes nothing. */
+   media query the sidebar sits off the bottom of the screen until asked for
+   — that part of sideOpen only ever matters there. On a wide screen the
+   column is always in view, so sideOpen means something else there instead:
+   whether the settings button's project view is the one currently showing
+   in it (see buildInspector()). Either way this is the one flag both
+   screens read, so rebuilding the inspector on every flip keeps a wide
+   screen's column in step with it, not just a phone's sheet. */
 let sideOpen = false;
 
 function setSide(open) {
@@ -1358,6 +1359,7 @@ function setSide(open) {
   document.body.classList.toggle('side-open', sideOpen);
   $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
   $('#panelBtn').classList.toggle('on', sideOpen);
+  buildInspector();
 }
 
 /* ---------------------------------------------------- the element's drawer
@@ -1550,10 +1552,11 @@ function marginNote() {
     'before folding, for an edge-to-edge result.';
 }
 
-/* Shared between #inspector and, on a phone, #elemInspector — each only
-   ever holds markup relevant to itself (data-k and friends are exclusive to
-   inspectorForEl's output, the rest to inspectorForPage's), so wiring both
-   from the same set of selectors is safe. */
+/* Shared between #inspector and, on a phone, #elemInspector / #pageInspector
+   — each only ever holds markup relevant to itself (data-k and friends are
+   exclusive to inspectorForEl's output, the rest to pageSectionHtml's and
+   projectSectionHtml's), so wiring all of them from the same set of
+   selectors is safe. */
 function wireInspector(side) {
   side.querySelectorAll('[data-k]').forEach(node => {
     const k = node.dataset.k;

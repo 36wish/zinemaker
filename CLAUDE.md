@@ -160,21 +160,29 @@ column and becomes a sheet that slides up over the stage, toggled by `#panelBtn`
 phone** — it is the only place most controls exist, which is what the earlier
 breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
 
-**On a phone, `#panelBtn` and its sheet (`#side`) mean the whole project, full
-stop — never a page or a selected element.** `inspectorForPage()` is split into
-`pageSectionHtml()` ("This page": panel colour, layout, clear panel) and
-`projectSectionHtml()` ("Whole project": printer margin, print guides);
-`buildInspector()` puts only `projectSectionHtml()` into `#inspector` when
-`narrow()`, `inspectorForEl(el)` when wide and something is selected, and the
-full `inspectorForPage()` (both sections concatenated) when wide and nothing
-is. "This page" and a selection each get their own independent bottom sheet
-instead, and the two are mutually exclusive by construction — one needs
-`selected()`, the other needs `!selected()` — so they never contend for the
-same tab: `#elemDrawer`, shown by `syncElemDrawer()` whenever something is
-selected, and `#pageDrawer`, its mirror image, shown by `syncPageDrawer()`
-whenever nothing is. Both start closed (`.elem-peek` only, not `.open`) the
-moment they appear rather than sprung open, and tapping their own peek bar
-(`#elemPeek` / `#pagePeek`) is the only thing that opens either
+**`#panelBtn` means the whole project, full stop — never a page or a selected
+element — and that now holds at every width, not just on a phone.**
+`inspectorForPage()` is gone; the old "This page" + "Whole project" markup is
+split into `pageSectionHtml()` and `projectSectionHtml()`, and nothing ever
+concatenates them back together. `buildInspector()` puts `projectSectionHtml()`
+into `#inspector` whenever `narrow() || sideOpen`, `inspectorForEl(el)` when
+neither and something is selected, and `pageSectionHtml()` when neither and
+nothing is. `sideOpen` therefore means two different things depending on
+width — on a phone it is `#side`'s open/shut sheet state, and on a wide
+screen there is no sheet to open, so it is simply the settings button's own
+toggle for which of the three the one sidebar column is showing — but it is
+the one flag both read, so `setSide()` calls `buildInspector()` on every
+flip and a wide screen's column swaps in place instead of sliding.
+
+On a phone, "This page" and a selection each also get their own independent
+bottom sheet, on top of that column, since there is no room to show either
+beside the stage at all: `#elemDrawer`, shown by `syncElemDrawer()` whenever
+something is selected, and `#pageDrawer`, its mirror image, shown by
+`syncPageDrawer()` whenever nothing is — mutually exclusive by construction,
+since one needs `selected()` and the other needs `!selected()`, so they never
+contend for the same tab. Both start closed (`.elem-peek` only, not `.open`)
+the moment they appear rather than sprung open, and tapping their own peek
+bar (`#elemPeek` / `#pagePeek`) is the only thing that opens either
 (`elemDrawerOpen` / `pageDrawerOpen`). `#pageDrawer` reuses `#elemDrawer`'s CSS
 wholesale by sharing its `.elem-drawer` class — `.page-drawer` is just a JS
 hook, not a separate stylesheet rule. All three sheets share the bottom edge,
@@ -188,8 +196,8 @@ takes the container to wire as a parameter now, since `#inspector`,
 `syncInspector()` (used mid-drag, so it must not rebuild anything) only ever
 targets `#inspector` or `#elemInspector`, since it bails out immediately when
 nothing is selected and `#pageDrawer` only ever shows when nothing is. On a
-wide screen `#elemDrawer` and `#pageDrawer` stay `hidden` and the one sidebar
-column behaves exactly as it always did.
+wide screen `#elemDrawer` and `#pageDrawer` stay `hidden`, since the one
+sidebar column already covers what they are for.
 
 The title, paper size and the open/save buttons live in the toolbar on a wide
 screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
