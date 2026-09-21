@@ -312,6 +312,26 @@
   }
   .tpl:hover span { color: var(--fg); }
 
+  /* photo filter swatches — the .f-* filter classes are #page-css's own, so
+     this just reuses them on a small copy of the actual photo rather than
+     duplicating the filter values here. */
+  .filter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .swatch {
+    background: #26262f; border: 1px solid var(--line); border-radius: 5px;
+    padding: 4px; cursor: pointer; display: block; text-align: center;
+  }
+  .swatch:hover { border-color: var(--accent2); background: #32323e; }
+  .swatch.on { border-color: var(--accent2); background: #2a2f42; }
+  .swatch img {
+    display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+    border-radius: 2px; background: #000;
+  }
+  .swatch span {
+    display: block; font-size: 9px; color: var(--dim); text-align: center;
+    margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .swatch:hover span, .swatch.on span { color: var(--fg); }
+
   .fold { width: 100%; height: auto; display: block; margin-bottom: 10px; }
   .fold text { font: 9px sans-serif; fill: var(--dim); }
   .fold rect { fill: none; stroke: var(--line); }
