@@ -262,7 +262,12 @@
     grid-area: side; background: var(--bg2); border-left: 1px solid var(--line);
     overflow-y: auto; padding: 14px;
   }
-  .side h2 {
+  /* Every panel title — Text/Image/QR code, This page, Whole project,
+     Document, and the Layout/Printer margin/Print guides sub-headers — is
+     one of these, so they read as one system rather than a mix of styles.
+     #elemInspector/#pageInspector sit outside .side (they're their own
+     fixed drawers on a phone), so this has to reach them explicitly too. */
+  .side h2, .elem-drawer h2 {
     font-family: inherit; font-size: 10px; font-weight: 600; line-height: 1;
     letter-spacing: .12em; text-transform: uppercase;
     color: var(--dim); margin: 0 0 12px;
@@ -270,16 +275,6 @@
   .grp { border-top: 1px solid var(--line); padding: 14px 0; }
   .grp:first-child { border-top: none; padding-top: 0; }
   .grp:last-child { padding-bottom: 0; }
-  .side-section {
-    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .04em;
-    color: var(--fg); margin: 22px 0 2px; padding-top: 16px; border-top: 2px solid var(--line);
-  }
-  .side-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
-  .side-section small {
-    display: block; font-size: 10px; font-weight: 400; letter-spacing: .04em;
-    text-transform: uppercase; color: var(--dim); margin-top: 3px;
-  }
-  .side-section + .grp { border-top: none; padding-top: 8px; }
   .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .row > * { min-width: 0; }
   .row .grow { flex: 1; }
@@ -656,7 +651,7 @@
        of the toolbar by app.js — see MOBILE_SETTINGS. Empty and hidden on a
        wide screen, where those controls stay in the toolbar. -->
   <div class="grp" id="docSettings" hidden>
-    <div class="side-section">Document</div>
+    <h2>Document</h2>
     <div class="row">
       <label class="f" style="margin:0;flex:none;width:40px">Title</label>
       <span class="grow" id="slotTitle"></span>

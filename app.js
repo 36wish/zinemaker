@@ -1180,8 +1180,9 @@ function templateThumb(tpl) {
    and a wide screen's single sidebar column shows exactly one of them (or a
    selection) at a time too now; see buildInspector(). */
 function pageSectionHtml() {
-  return '<div class="side-section">This page<small>Panel ' + (state.active + 1) + ' of 8' +
-      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</small></div>' +
+  return '<h2>This page</h2>' +
+    '<div class="hint">Panel ' + (state.active + 1) + ' of 8' +
+      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</div>' +
 
     '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
       '<input type="color" data-page="bg" value="' + panel().bg + '"></div></div>' +
@@ -1197,7 +1198,8 @@ function pageSectionHtml() {
 
 function projectSectionHtml() {
   const g = geom();
-  return '<div class="side-section">Whole project<small>Same on every page</small></div>' +
+  return '<h2>Whole project</h2>' +
+    '<div class="hint">Same on every page</div>' +
 
     '<div class="grp"><h2>Printer margin</h2>' +
       '<div class="row"><div class="col">' +
