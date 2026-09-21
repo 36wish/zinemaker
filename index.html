@@ -655,6 +655,18 @@
   </button>
   <div id="elemInspector"></div>
 </div>
+<!-- This page's own controls (panel colour, layout, clear panel), on a phone
+     only (see syncPageDrawer in app.js) — the element drawer's mirror image,
+     shown whenever nothing is selected instead of when something is, so the
+     two never fight over the same bottom edge. Reuses .elem-drawer's CSS
+     wholesale; .page-drawer is just a hook, not a separate style. -->
+<div class="elem-drawer page-drawer" id="pageDrawer" hidden>
+  <button type="button" class="elem-peek" id="pagePeek" aria-expanded="false" aria-controls="pageInspector">
+    <span class="elem-peek-label" id="pagePeekLabel"></span>
+    <svg class="elem-peek-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+  </button>
+  <div id="pageInspector"></div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script src="qr.js"></script>

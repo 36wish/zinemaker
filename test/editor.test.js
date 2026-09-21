@@ -253,6 +253,23 @@ module.exports = {
       assert.ok(r.y > -1000, 'y ran away to ' + r.y);
     });
 
+    t.check('clicking the blank stage clears the selection', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        const selBefore = selected() && selected().id;
+        const stage = document.getElementById('stage');
+        const sheet = document.querySelector('.sheet-box').getBoundingClientRect();
+        stage.dispatchEvent(new MouseEvent('click', {
+          clientX: stage.getBoundingClientRect().left + 5,
+          clientY: sheet.top + sheet.height / 2, bubbles: true
+        }));
+        return { selBefore: selBefore, selAfter: selected() };
+      })()`);
+      assert.ok(r.selBefore, 'a text element should have been selected first');
+      assert.eq(r.selAfter, null, 'clicking the blank stage should clear the selection');
+    });
+
     t.check('a QR element renders, stays square and grows with its payload', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {
