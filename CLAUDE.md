@@ -255,7 +255,14 @@ Touch is not just a narrower mouse:
 
 `fitZoom()` measures the strip, the labels and the stage padding rather than
 assuming a desktop window, and `paintStrip()` calls it once the thumbnails exist,
-since their height is part of the sheet's budget.
+since their height is part of the sheet's budget. `#sheetLabels` (the page-name
+row above the sheet) is hidden outright on a phone — the thumbnail strip below
+already does the same job of switching pages, and dropping the row hands its
+space back to the sheet — so `fitZoom()` treats its height as 0 there rather
+than falling back to a desktop guess. The stage's own bottom padding on a
+phone reserves room for whichever of `#elemDrawer` / `#pageDrawer` is peeking
+(always one of them, since they are mutually exclusive — see "Small screens"
+above), so the thumbnail strip scales to fit above it instead of under it.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.

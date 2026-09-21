@@ -704,7 +704,9 @@ function fitZoom() {
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const stripH = $('#strip').offsetHeight || 96;
-  const labelH = $('#sheetLabels').offsetHeight || 22;
+  // Hidden outright on a phone (see #sheetLabels in the narrow query), where
+  // its offsetHeight is always genuinely 0, not just unmeasured yet.
+  const labelH = narrow() ? 0 : ($('#sheetLabels').offsetHeight || 22);
   const availW = stage.clientWidth - padX - 4;
   const availH = stage.clientHeight - padY - stripH - labelH - 10;
   const z = Math.max(0.15, Math.min(availW / (g.panelW * cols), availH / g.panelH, 2.6));
