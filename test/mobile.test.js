@@ -342,21 +342,69 @@ module.exports = {
         setActive(1); addText(); stopEdit();
         const el = selected();
         const drawer = document.getElementById('elemDrawer');
+        const sideText = document.getElementById('inspector').textContent;
         return {
           shown: !drawer.hidden,
           open: drawer.classList.contains('open'),
           label: document.getElementById('elemPeekLabel').textContent,
-          pageStillShowsPage: document.getElementById('inspector').textContent.indexOf('This page') >= 0,
-          pageHasNoElementFields: !document.querySelector('#inspector [data-k]')
+          settingsShowsProjectOnly: sideText.indexOf('Whole project') >= 0 && sideText.indexOf('This page') < 0,
+          pageHasNoElementFields: !document.querySelector('#inspector [data-k]'),
+          pageDrawerHidden: document.getElementById('pageDrawer').hidden
         };
       })()`);
       assert.eq(r.shown, true, 'selecting something should bring the drawer up');
       assert.eq(r.open, false, 'it should appear closed, not sprung open');
       assert.eq(r.label, 'Text', 'the peek should say what is selected');
-      assert.eq(r.pageStillShowsPage, true,
-        'the settings sheet must keep showing the project, not the selection');
+      assert.eq(r.settingsShowsProjectOnly, true,
+        'the settings sheet must keep showing the project, never the page or the selection');
       assert.eq(r.pageHasNoElementFields, true,
         'a selected element\'s own fields must not leak into the settings sheet');
+      assert.eq(r.pageDrawerHidden, true,
+        'the page drawer is for when nothing is selected, so a selection should keep it away');
+    });
+
+    t.check('nothing selected shows the page in its own drawer, not the settings button', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        setActive(1);
+        const drawer = document.getElementById('pageDrawer');
+        const sideText = document.getElementById('inspector').textContent;
+        return {
+          shown: !drawer.hidden,
+          open: drawer.classList.contains('open'),
+          label: document.getElementById('pagePeekLabel').textContent,
+          hasTemplates: !!document.querySelector('#pageInspector [data-tpl]'),
+          settingsShowsProjectOnly: sideText.indexOf('Whole project') >= 0 && sideText.indexOf('This page') < 0
+        };
+      })()`);
+      assert.eq(r.shown, true, 'nothing selected should bring the page drawer up');
+      assert.eq(r.open, false, 'it should appear closed, not sprung open');
+      assert.eq(r.label, 'Panel 2 (2)', 'the peek should say which panel');
+      assert.eq(r.hasTemplates, true, 'the page drawer should hold the layout templates');
+      assert.eq(r.settingsShowsProjectOnly, true,
+        'the settings sheet must keep showing the project, never the page');
+    });
+
+    t.check('selecting something swaps the page drawer for the element drawer, and back', async () => {
+      await phone();
+      const before = await page.evaluate("!document.getElementById('pageDrawer').hidden");
+      assert.eq(before, true, 'the page drawer should be up with nothing selected');
+
+      await page.evaluate(`(() => { setActive(1); addText(); stopEdit(); })()`);
+      const during = await page.evaluate(`({
+        pageHidden: document.getElementById('pageDrawer').hidden,
+        elemShown: !document.getElementById('elemDrawer').hidden
+      })`);
+      assert.eq(during.pageHidden, true, 'selecting something should take the page drawer away');
+      assert.eq(during.elemShown, true, 'and bring the element drawer up instead');
+
+      await page.evaluate('select(null)');
+      const after = await page.evaluate(`({
+        pageShown: !document.getElementById('pageDrawer').hidden,
+        elemHidden: document.getElementById('elemDrawer').hidden
+      })`);
+      assert.eq(after.pageShown, true, 'deselecting should bring the page drawer back');
+      assert.eq(after.elemHidden, true, 'and take the element drawer away again');
     });
 
     t.check('nothing selected means no drawer, and deselecting closes it again', async () => {

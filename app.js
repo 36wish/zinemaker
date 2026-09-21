@@ -976,6 +976,7 @@ function onKey(e) {
   if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
   if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
   if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
+  if (e.key === 'Escape' && pageDrawerOpen) { setPageDrawer(false); return; }
   if (e.key === 'Escape') { select(null); return; }
   const el = selected();
   if (!el) return;
@@ -1045,16 +1046,19 @@ function foldDiagram() {
     '</text></svg>';
 }
 
-/* On a phone the settings button means the whole project, full stop, so the
-   sheet it opens never switches to a selected element's own controls — see
-   syncElemDrawer() for where those go instead. On a wide screen there is no
-   such button and no elem-drawer; the one sidebar column still shows
-   whichever is relevant, as it always has. */
+/* On a phone the settings button means the whole project, full stop — "This
+   page" (panel colour, layout, clear panel) lives in its own bottom tab
+   instead, shown whenever nothing is selected (see syncPageDrawer()), and a
+   selected element gets a third, mutually exclusive tab of its own (see
+   syncElemDrawer()). On a wide screen there is no such button and no
+   drawers; the one sidebar column shows page and project settings together
+   when nothing is selected, exactly as it always has. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
-  side.innerHTML = (!narrow() && el) ? inspectorForEl(el) : inspectorForPage();
+  side.innerHTML = narrow() ? projectSectionHtml() : (el ? inspectorForEl(el) : inspectorForPage());
   wireInspector(side);
   syncElemDrawer();
+  syncPageDrawer();
   paintHelp();
 }
 
@@ -1166,7 +1170,12 @@ function templateThumb(tpl) {
   return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + r + '</svg>';
 }
 
-function inspectorForPage() {
+/* Split so a phone can put "This page" in its own bottom tab (see
+   syncPageDrawer()) while "Whole project" stays behind the settings button
+   — inspectorForPage() just concatenates the two, which is exactly what a
+   wide screen's single sidebar column still wants when nothing is
+   selected. */
+function pageSectionHtml() {
   const g = geom();
   return '<div class="side-section">This page<small>Panel ' + (state.active + 1) + ' of 8' +
       (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</small></div>' +
@@ -1181,9 +1190,11 @@ function inspectorForPage() {
     '</div></div>' +
 
     '<div class="grp"><div class="row">' +
-      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>' +
+      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>';
+}
 
-    '<div class="side-section">Whole project<small>Same on every page</small></div>' +
+function projectSectionHtml() {
+  return '<div class="side-section">Whole project<small>Same on every page</small></div>' +
 
     '<div class="grp"><h2>Printer margin</h2>' +
       '<div class="row"><div class="col">' +
@@ -1209,6 +1220,10 @@ function inspectorForPage() {
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
         '<div class="seg"><button data-cut="0"' + on(!state.cut) + '>Off</button>' +
         '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>';
+}
+
+function inspectorForPage() {
+  return pageSectionHtml() + projectSectionHtml();
 }
 
 /* ------------------------------------------------------------------- help */
@@ -1347,7 +1362,8 @@ function setSide(open) {
    project's, never a selected element's, so a selection gets its own bar
    instead of borrowing that one. It appears — closed, as a peeking bar —
    the instant something becomes selected, and disappears the instant
-   nothing is. Opening it is a separate choice, left up to whoever wants it. */
+   nothing is. Opening it is a separate choice, left up to whoever wants it.
+   syncPageDrawer(), below, is its mirror for when nothing is selected. */
 let elemDrawerOpen = false;
 
 function setElemDrawer(open) {
@@ -1371,6 +1387,35 @@ function syncElemDrawer() {
   $('#elemPeekLabel').textContent = elemLabel(el);
   $('#elemInspector').innerHTML = inspectorForEl(el);
   wireInspector($('#elemInspector'));
+}
+
+/* ------------------------------------------------------- the page's drawer
+
+   The element drawer's mirror image: it shows "This page" (see
+   pageSectionHtml()) instead of a selection, so it appears exactly when
+   syncElemDrawer()'s does not — nothing selected — and the two never
+   contend for the same bottom edge. Same closed-by-default behaviour. */
+let pageDrawerOpen = false;
+
+function setPageDrawer(open) {
+  pageDrawerOpen = !!open;
+  $('#pageDrawer').classList.toggle('open', pageDrawerOpen);
+  $('#pagePeek').setAttribute('aria-expanded', pageDrawerOpen ? 'true' : 'false');
+}
+
+function syncPageDrawer() {
+  const el = selected(), drawer = $('#pageDrawer');
+  const show = narrow() && !el;
+  const wasShown = !drawer.hidden;
+  drawer.hidden = !show;
+  if (!show) {
+    if (wasShown) setPageDrawer(false);     // closed again, ready for next time
+    return;
+  }
+  if (!wasShown) setPageDrawer(false);      // just appeared: start closed, not sprung open
+  $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) + ' (' + LABELS[state.active] + ')';
+  $('#pageInspector').innerHTML = pageSectionHtml();
+  wireInspector($('#pageInspector'));
 }
 
 /* The title, paper size and file buttons live in the toolbar on a wide
@@ -2097,6 +2142,7 @@ function init() {
   $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
   $('#sideClose').addEventListener('click', () => setSide(false));
   $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));
+  $('#pagePeek').addEventListener('click', () => setPageDrawer(!pageDrawerOpen));
   $('#viewToggle').addEventListener('click', () => setSingleView(!state.singleView));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
@@ -2140,6 +2186,14 @@ function init() {
   });
 
   const stage = $('#stage');
+  // A click on the bare stage — the dark gutter around the sheet, not the
+  // sheet, the strip or the page labels, each of which already handles its
+  // own clicks — clears whatever is selected, the way clicking empty canvas
+  // does elsewhere. click rather than pointerdown so a drag that pans the
+  // stage on touch never gets read as a tap.
+  stage.addEventListener('click', e => {
+    if (selected() && !e.target.closest('.sheet, .strip, .sheet-labels')) select(null);
+  });
   let dragDepth = 0;
   stage.addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth) stage.classList.add('dragging'); });
   stage.addEventListener('dragover', e => e.preventDefault());
