@@ -379,7 +379,7 @@ module.exports = {
       await page.reset({ margin: 5, trimMargin: false });
       const r = await page.evaluate(`(() => {
         setActive(0);
-        buildInspector();
+        setSide(true);   // project settings, including trim, live behind the settings button now
         const before = document.querySelectorAll('#sheet .chop').length;
         document.querySelector('[data-trim="1"]').click();
         const afterTrim = document.querySelectorAll('#sheet .chop').length;

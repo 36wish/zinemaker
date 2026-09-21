@@ -154,6 +154,7 @@ async function openApp(url) {
         hist.length = 0; future.length = 0;
         Object.assign(state, ${JSON.stringify(over || {})});
         if (helpOpen) setHelp(false);
+        if (sideOpen) setSide(false);
         paintAll();
         return true;
       })()`);

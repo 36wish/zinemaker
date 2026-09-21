@@ -469,6 +469,45 @@ module.exports = {
       assert.eq(wide, true, 'a wide screen has room, so its one sidebar still shows the selection as before');
     });
 
+    t.check('a wide screen shows page settings, not project settings, when nothing is selected', async () => {
+      await page.unemulate();
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        select(null);
+        const text = document.getElementById('inspector').textContent;
+        return { hasPage: text.indexOf('This page') >= 0, hasProject: text.indexOf('Whole project') >= 0 };
+      })()`);
+      assert.eq(r.hasPage, true, 'nothing selected should show the page section');
+      assert.eq(r.hasProject, false, 'project settings should stay behind the settings button');
+    });
+
+    t.check('the settings button swaps the wide sidebar to project settings and back', async () => {
+      await page.unemulate();
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        const beforeText = document.getElementById('inspector').textContent;
+        document.getElementById('panelBtn').click();
+        const openText = document.getElementById('inspector').textContent;
+        const onClass = document.getElementById('panelBtn').classList.contains('on');
+        document.getElementById('panelBtn').click();
+        const closedText = document.getElementById('inspector').textContent;
+        return {
+          beforeHadText: beforeText.indexOf('Text') >= 0,
+          openHasProject: openText.indexOf('Whole project') >= 0,
+          openHasNoSelection: openText.indexOf('Rotate') < 0,
+          onClass: onClass,
+          closedBackToSelection: closedText.indexOf('Text') >= 0
+        };
+      })()`);
+      assert.eq(r.beforeHadText, true, 'a selected text element should show its own controls first');
+      assert.eq(r.openHasProject, true, 'pressing the settings button should show project settings');
+      assert.eq(r.openHasNoSelection, true,
+        'project settings should replace the selection view entirely, not add to it');
+      assert.eq(r.onClass, true, 'the button should show it is pressed');
+      assert.eq(r.closedBackToSelection, true, 'pressing it again should bring the selection view back');
+    });
+
     t.check('the desktop layout comes back on a wide window', async () => {
       await phone();
       await page.evaluate(`(() => {
@@ -481,7 +520,8 @@ module.exports = {
         const side = document.getElementById('side').getBoundingClientRect();
         return { narrow: narrow(), sideRight: Math.round(side.right),
                  inner: innerWidth, sideTop: Math.round(side.top),
-                 toggle: getComputedStyle(document.getElementById('panelBtn')).display,
+                 settingsBtn: getComputedStyle(document.getElementById('panelBtn')).display,
+                 spreadToggle: getComputedStyle(document.getElementById('viewToggle')).display,
                  titleInBar: document.querySelector('.bar #title') === document.getElementById('title'),
                  openInBar: document.querySelector('.bar #openZine') !== null,
                  titleVal: document.getElementById('title').value,
@@ -489,7 +529,8 @@ module.exports = {
                };
       })()`);
       assert.eq(r.narrow, false);
-      assert.eq(r.toggle, 'none', 'the toggle belongs to the phone layout only');
+      assert.ok(r.settingsBtn !== 'none', 'the settings button toggles the project view on a wide screen too');
+      assert.eq(r.spreadToggle, 'none', 'the one/two-page toggle belongs to the phone layout only');
       assert.near(r.sideRight, r.inner, 2, 'the inspector is a column again');
       assert.ok(r.sideTop < 200, 'and runs the height of the window');
       assert.eq(r.titleInBar, true, 'the title input should be back in the toolbar');
