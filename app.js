@@ -666,7 +666,10 @@ function paintPage() {
   fitZoom();
 }
 
-/* Page names above the sheet; the highlighted one receives new elements. */
+/* Page names above the sheet; the highlighted one receives new elements.
+   Clicking a label is a switch-page gesture, not a selection one — even the
+   highlighted label's own click deselects, which setActive() alone would
+   miss when it is already the active page. */
 function paintLabels(list) {
   const row = $('#sheetLabels');
   row.textContent = '';
@@ -677,7 +680,7 @@ function paintLabels(list) {
     s.appendChild(pill);
     s.title = 'Panel ' + (pi + 1);
     if (pi === state.active) s.className = 'on';
-    s.addEventListener('click', () => setActive(pi));
+    s.addEventListener('click', () => { setActive(pi); select(null); });
     row.appendChild(s);
   });
 }
@@ -701,7 +704,9 @@ function fitZoom() {
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const stripH = $('#strip').offsetHeight || 96;
-  const labelH = $('#sheetLabels').offsetHeight || 22;
+  // Hidden outright on a phone (see #sheetLabels in the narrow query), where
+  // its offsetHeight is always genuinely 0, not just unmeasured yet.
+  const labelH = narrow() ? 0 : ($('#sheetLabels').offsetHeight || 22);
   const availW = stage.clientWidth - padX - 4;
   const availH = stage.clientHeight - padY - stripH - labelH - 10;
   const z = Math.max(0.15, Math.min(availW / (g.panelW * cols), availH / g.panelH, 2.6));
@@ -996,14 +1001,6 @@ function onKey(e) {
 
 /* ---------------------------------------------------------------- inspector */
 
-function opts(list, cur, val, name) {
-  return list.map((o, i) => {
-    const v = val ? o[val] : i;
-    return '<option value="' + v + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' +
-           (name ? o[name] : o) + '</option>';
-  }).join('');
-}
-
 function foldDiagram() {
   const cw = 60, ch = 42, x0 = 4, y0 = 12;
   const g = geom(), mmv = clampMargin(state.margin);
@@ -1082,7 +1079,10 @@ function inspectorForEl(el) {
   if (el.type === 'text') {
     return '<h2>Text</h2>' +
       '<div class="grp"><div class="row">' +
-        '<select class="grow" data-k="font" data-num>' + opts(FONTS, el.font, null, 'n') + '</select>' +
+        '<select class="grow" data-k="font" data-num>' +
+          FONTS.map((f, i) => '<option value="' + i + '"' + (i === el.font ? ' selected' : '') +
+            ' style="font-family:' + esc(f.c) + '">' + esc(f.n) + '</option>').join('') +
+        '</select>' +
       '</div><div class="row">' +
         '<div class="col"><label class="f">Size</label><input class="num grow" type="number" min="4" max="200" data-k="size" data-num value="' + el.size + '"></div>' +
         '<div class="col"><label class="f">Line</label><input class="num grow" type="number" step="0.05" data-k="lh" data-num value="' + el.lh + '"></div>' +
@@ -1125,9 +1125,13 @@ function inspectorForEl(el) {
   }
 
   return '<h2>Image</h2>' +
+    '<div class="grp"><label class="f">Effect</label><div class="filter-grid">' +
+      FILTERS.map(f => '<button class="swatch' + ((el.filter || 'none') === f.v ? ' on' : '') +
+        '" data-k="filter" data-v="' + f.v + '" title="' + esc(f.n) + '">' +
+        '<img class="' + (f.v === 'none' ? '' : 'f-' + f.v) + '" src="' + esc(el.src || '') + '">' +
+        '<span>' + esc(f.n) + '</span></button>').join('') +
+    '</div></div>' +
     '<div class="grp"><div class="row">' +
-      '<div class="col"><label class="f">Effect</label><select class="grow" data-k="filter">' + opts(FILTERS, el.filter, 'v', 'n') + '</select></div>' +
-    '</div><div class="row">' +
       '<div class="col"><label class="f">Fit</label><div class="seg">' +
         '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + '>Crop</button>' +
         '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + '>Whole</button></div></div>' +
@@ -1568,7 +1572,14 @@ function wireInspector(side) {
       let v = num ? parseFloat(node.value) : node.value;
       if (num && !isFinite(v)) return;
       if (num && (k === 'w' || k === 'h')) v = Math.max(8, v);
-      if (k === 'rot') v = wrapDeg(v);
+      if (k === 'rot') {
+        v = wrapDeg(v);
+        // A magnetic detent at dead level: only the slider, whose continuous
+        // drag makes 0 hard to land on exactly — the number field is already
+        // exact, so it is left alone. Snapping the thumb too, not just the
+        // value, is what makes it feel like a detent rather than a dead zone.
+        if (node.type === 'range' && Math.abs(v) <= 3) { v = 0; node.value = 0; }
+      }
       el[k] = v;
       paintPage(); paintStripSoon(); syncInspector(); save();
     };

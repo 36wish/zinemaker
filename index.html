@@ -48,6 +48,10 @@
     --accent: #ff4f6d;
     --accent2: #5b8cff;
     --radius: 7px;
+    /* The element/page drawer's peek bar height, on a phone. One of the two
+       is always showing — see .stage's bottom padding in the narrow query,
+       which reserves room for it so it never covers the thumbnail strip. */
+    --peek-h: 48px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -308,6 +312,26 @@
   }
   .tpl:hover span { color: var(--fg); }
 
+  /* photo filter swatches — the .f-* filter classes are #page-css's own, so
+     this just reuses them on a small copy of the actual photo rather than
+     duplicating the filter values here. */
+  .filter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .swatch {
+    background: #26262f; border: 1px solid var(--line); border-radius: 5px;
+    padding: 4px; cursor: pointer; display: block; text-align: center;
+  }
+  .swatch:hover { border-color: var(--accent2); background: #32323e; }
+  .swatch.on { border-color: var(--accent2); background: #2a2f42; }
+  .swatch img {
+    display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+    border-radius: 2px; background: #000;
+  }
+  .swatch span {
+    display: block; font-size: 9px; color: var(--dim); text-align: center;
+    margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .swatch:hover span, .swatch.on span { color: var(--fg); }
+
   .fold { width: 100%; height: auto; display: block; margin-bottom: 10px; }
   .fold text { font: 9px sans-serif; fill: var(--dim); }
   .fold rect { fill: none; stroke: var(--line); }
@@ -405,7 +429,14 @@
     .spacer { display: none; }
     #panelBtn, #viewToggle { display: inline-block; }
 
-    .stage { padding: 10px 10px 2px; }
+    /* The page label row above the sheet is redundant with the thumbnail
+       strip below, which is reachable and does the same job — dropping it
+       hands that room back to the sheet. */
+    #sheetLabels { display: none; }
+    /* One of the element/page drawers is always peeking at the bottom of the
+       screen here (see #pageDrawer / #elemDrawer) — reserve room for it so
+       fitZoom() scales the sheet and strip to fit above it, not under it. */
+    .stage { padding: 10px 10px calc(var(--peek-h) + 10px + env(safe-area-inset-bottom)); }
     .strip {
       flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
       justify-content: flex-start; gap: 6px; padding: 8px 2px 4px;
@@ -458,7 +489,7 @@
       border-radius: 14px 14px 0 0;
       box-shadow: 0 -10px 28px rgba(0, 0, 0, .45);
       overflow-y: auto; overscroll-behavior: contain;
-      transform: translateY(calc(100% - 48px));
+      transform: translateY(calc(100% - var(--peek-h)));
       transition: transform .2s ease;
     }
     .elem-drawer[hidden] { display: none; }
@@ -466,7 +497,7 @@
     /* The settings sheet already owns the bottom edge while it is open. */
     body.side-open .elem-drawer { transform: translateY(calc(100% + 40px)); }
     .elem-peek {
-      display: flex; align-items: center; gap: 8px; width: 100%; height: 48px;
+      display: flex; align-items: center; gap: 8px; width: 100%; height: var(--peek-h);
       position: sticky; top: 0; z-index: 1;
       padding: 0 14px; margin: 0; border: none; border-radius: 0;
       background: var(--bg2); color: var(--fg); font: inherit; text-align: left;

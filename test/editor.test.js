@@ -226,6 +226,28 @@ module.exports = {
       assert.eq(rot, 90, 'dragging the handle due east of centre should give 90 degrees');
     });
 
+    t.check('the rotation slider has a magnetic detent at 0°', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0); addText(); stopEdit();
+        buildInspector();
+        const el = selected();
+        const range = document.querySelector('#inspector input[type="range"][data-k="rot"]');
+        const num = document.querySelector('#inspector input[type="number"][data-k="rot"]');
+        range.value = 2; range.dispatchEvent(new Event('input', { bubbles: true }));
+        const nearZero = { rot: el.rot, sliderValue: range.value };
+        range.value = 10; range.dispatchEvent(new Event('input', { bubbles: true }));
+        const away = el.rot;
+        num.value = 2; num.dispatchEvent(new Event('input', { bubbles: true }));
+        const numberField = el.rot;
+        return { nearZero: nearZero, away: away, numberField: numberField };
+      })()`);
+      assert.eq(r.nearZero.rot, 0, 'a small drag near zero should snap the value to it');
+      assert.eq(r.nearZero.sliderValue, '0', 'the thumb should snap too, not just the stored value');
+      assert.eq(r.away, 10, 'a value well away from zero should not be pulled in');
+      assert.eq(r.numberField, 2, 'the exact number field has no detent to fight');
+    });
+
     t.check('shift locks the drag axis', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {
@@ -268,6 +290,82 @@ module.exports = {
       })()`);
       assert.ok(r.selBefore, 'a text element should have been selected first');
       assert.eq(r.selAfter, null, 'clicking the blank stage should clear the selection');
+    });
+
+    t.check("clicking a page label deselects, even the active page's own", async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0); addText(); stopEdit();
+        const before = selected() && selected().id;
+        // the active page's own label: same page, so setActive() alone is a no-op
+        document.querySelector('#sheetLabels span.on').click();
+        const afterSame = selected();
+
+        addText(); stopEdit();
+        const beforeOther = selected() && selected().id;
+        const other = [...document.querySelectorAll('#sheetLabels span')]
+          .find(s => !s.classList.contains('on'));
+        other.click();
+
+        return { before: before, afterSame: afterSame, beforeOther: beforeOther, afterOther: selected() };
+      })()`);
+      assert.ok(r.before, 'a text element should have been selected first');
+      assert.eq(r.afterSame, null, "clicking the active page's own label should still deselect");
+      assert.ok(r.beforeOther, 'a second text element should have been selected');
+      assert.eq(r.afterOther, null, 'clicking another page\'s label should deselect too');
+    });
+
+    t.check('the image effect picker shows a live preview per filter, not a plain dropdown', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const px = ${pngDataUrl('#3498db')};
+        panel().els.push({ id: 'i1', type: 'image', x: 0, y: 0, w: 40, h: 40, rot: 0,
+          src: px, fit: 'cover', filter: 'none', opacity: 1, radius: 0 });
+        selId = 'i1';
+        buildInspector();
+        const el = selected();
+        const swatches = [...document.querySelectorAll('#inspector .swatch')];
+        const before = swatches.map(s => ({
+          v: s.dataset.v, on: s.classList.contains('on'),
+          src: s.querySelector('img').getAttribute('src'),
+          imgClass: s.querySelector('img').className
+        }));
+        swatches.find(s => s.dataset.v === 'ink').click();
+        return {
+          count: before.length,
+          allShowThePhoto: before.every(s => s.src === px),
+          filterClassesMatch: before.every(s => s.imgClass === (s.v === 'none' ? '' : 'f-' + s.v)),
+          noneWasOn: before.find(s => s.v === 'none').on,
+          filterAfterClick: el.filter,
+          inkNowOn: document.querySelector('#inspector .swatch[data-v="ink"]').classList.contains('on'),
+          noneNowOff: !document.querySelector('#inspector .swatch[data-v="none"]').classList.contains('on')
+        };
+      })()`);
+      assert.eq(r.count, 5, 'one swatch per filter');
+      assert.eq(r.allShowThePhoto, true, 'every swatch should preview the actual selected photo');
+      assert.eq(r.filterClassesMatch, true, 'each swatch should carry its own filter class, not a shared one');
+      assert.eq(r.noneWasOn, true, 'the starting filter should be marked current');
+      assert.eq(r.filterAfterClick, 'ink', 'clicking a swatch should apply that filter');
+      assert.eq(r.inkNowOn, true, 'the clicked swatch should become the marked one');
+      assert.eq(r.noneNowOff, true, 'the old current swatch should lose the mark');
+    });
+
+    t.check('the font picker shows each name set in its own font', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0); addText(); stopEdit();
+        buildInspector();
+        return [...document.querySelectorAll('#inspector select[data-k="font"] option')]
+          .map(o => getComputedStyle(o).fontFamily);
+      })()`);
+      assert.eq(r.length, 8, 'one option per font');
+      assert.ok(r[1].toLowerCase().includes('georgia'), 'Serif option should render in Georgia, got ' + r[1]);
+      assert.ok(r[3].toLowerCase().includes('impact'), 'Impact option should render in Impact, got ' + r[3]);
+      assert.ok(r[4].toLowerCase().includes('arial black'),
+        'Heavy option should render in Arial Black, got ' + r[4] +
+        ' (a quoted family name breaking the style attribute would truncate this)');
+      assert.ok(new Set(r).size > 1, 'options should not all fall back to one shared font');
     });
 
     t.check('a QR element renders, stays square and grows with its payload', async () => {
