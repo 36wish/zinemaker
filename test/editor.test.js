@@ -270,6 +270,29 @@ module.exports = {
       assert.eq(r.selAfter, null, 'clicking the blank stage should clear the selection');
     });
 
+    t.check("clicking a page label deselects, even the active page's own", async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0); addText(); stopEdit();
+        const before = selected() && selected().id;
+        // the active page's own label: same page, so setActive() alone is a no-op
+        document.querySelector('#sheetLabels span.on').click();
+        const afterSame = selected();
+
+        addText(); stopEdit();
+        const beforeOther = selected() && selected().id;
+        const other = [...document.querySelectorAll('#sheetLabels span')]
+          .find(s => !s.classList.contains('on'));
+        other.click();
+
+        return { before: before, afterSame: afterSame, beforeOther: beforeOther, afterOther: selected() };
+      })()`);
+      assert.ok(r.before, 'a text element should have been selected first');
+      assert.eq(r.afterSame, null, "clicking the active page's own label should still deselect");
+      assert.ok(r.beforeOther, 'a second text element should have been selected');
+      assert.eq(r.afterOther, null, 'clicking another page\'s label should deselect too');
+    });
+
     t.check('a QR element renders, stays square and grows with its payload', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {

@@ -666,7 +666,10 @@ function paintPage() {
   fitZoom();
 }
 
-/* Page names above the sheet; the highlighted one receives new elements. */
+/* Page names above the sheet; the highlighted one receives new elements.
+   Clicking a label is a switch-page gesture, not a selection one — even the
+   highlighted label's own click deselects, which setActive() alone would
+   miss when it is already the active page. */
 function paintLabels(list) {
   const row = $('#sheetLabels');
   row.textContent = '';
@@ -677,7 +680,7 @@ function paintLabels(list) {
     s.appendChild(pill);
     s.title = 'Panel ' + (pi + 1);
     if (pi === state.active) s.className = 'on';
-    s.addEventListener('click', () => setActive(pi));
+    s.addEventListener('click', () => { setActive(pi); select(null); });
     row.appendChild(s);
   });
 }
