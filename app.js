@@ -1060,7 +1060,7 @@ function buildInspector() {
   paintHelp();
 }
 
-function inspectorForEl(el) {
+function inspectorForEl(el, withHeading = true) {
   const common =
     '<div class="grp"><div class="row">' +
       '<div class="col"><label class="f">Rotate</label>' +
@@ -1077,8 +1077,10 @@ function inspectorForEl(el) {
     '<div class="row"><button class="grow" data-act="dup">Duplicate</button>' +
       '<button class="grow" data-act="del">Delete</button></div></div>';
 
+  // withHeading is false for the element drawer's own content: its peek bar
+  // already names the type (Text/QR code/Image), word for word.
   if (el.type === 'text') {
-    return '<h2>Text</h2>' +
+    return (withHeading ? '<h2>Text</h2>' : '') +
       '<div class="grp"><div class="row">' +
         '<select class="grow" data-k="font" data-num>' +
           FONTS.map((f, i) => '<option value="' + i + '"' + (i === el.font ? ' selected' : '') +
@@ -1103,7 +1105,7 @@ function inspectorForEl(el) {
 
   if (el.type === 'qr') {
     const q = qrFor(el.text || '', el.ecl || 'M');
-    return '<h2>QR code</h2>' +
+    return (withHeading ? '<h2>QR code</h2>' : '') +
       '<div class="grp"><div class="row">' +
         '<div class="col"><label class="f">Links to</label>' +
         '<input class="grow" type="text" data-k="text" value="' + esc(el.text || '') + '"></div>' +
@@ -1125,7 +1127,7 @@ function inspectorForEl(el) {
       '</div></div>' + common;
   }
 
-  return '<h2>Image</h2>' +
+  return (withHeading ? '<h2>Image</h2>' : '') +
     '<div class="grp"><label class="f">Effect</label><div class="filter-grid">' +
       FILTERS.map(f => '<button class="swatch' + ((el.filter || 'none') === f.v ? ' on' : '') +
         '" data-k="filter" data-v="' + f.v + '" title="' + esc(f.n) + '">' +
@@ -1179,10 +1181,12 @@ function templateThumb(tpl) {
    puts them in separate bottom tabs (see syncPageDrawer() / settings button),
    and a wide screen's single sidebar column shows exactly one of them (or a
    selection) at a time too now; see buildInspector(). */
-function pageSectionHtml() {
+function pageSectionHtml(withHint = true) {
   return '<h2>This page</h2>' +
-    '<div class="hint">Panel ' + (state.active + 1) + ' of 8' +
-      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</div>' +
+    // withHint is false for the page drawer's own content: its peek bar
+    // already names the panel, so repeating it here would just be noise.
+    (withHint ? '<div class="hint">Panel ' + (state.active + 1) + ' of 8' +
+      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</div>' : '') +
 
     '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
       '<input type="color" data-page="bg" value="' + panel().bg + '"></div></div>' +
@@ -1393,7 +1397,7 @@ function syncElemDrawer() {
   }
   if (!wasShown) setElemDrawer(false);      // just appeared: start closed, not sprung open
   $('#elemPeekLabel').textContent = elemLabel(el);
-  $('#elemInspector').innerHTML = inspectorForEl(el);
+  $('#elemInspector').innerHTML = inspectorForEl(el, false);
   wireInspector($('#elemInspector'));
 }
 
@@ -1422,7 +1426,7 @@ function syncPageDrawer() {
   }
   if (!wasShown) setPageDrawer(false);      // just appeared: start closed, not sprung open
   $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) + ' (' + LABELS[state.active] + ')';
-  $('#pageInspector').innerHTML = pageSectionHtml();
+  $('#pageInspector').innerHTML = pageSectionHtml(false);
   wireInspector($('#pageInspector'));
 }
 
