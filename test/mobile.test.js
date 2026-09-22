@@ -379,7 +379,7 @@ module.exports = {
       })()`);
       assert.eq(r.shown, true, 'nothing selected should bring the page drawer up');
       assert.eq(r.open, false, 'it should appear closed, not sprung open');
-      assert.eq(r.label, 'Panel 2 (2)', 'the peek should say which panel');
+      assert.eq(r.label, 'Panel 2', 'the peek should say which panel, without repeating its number');
       assert.eq(r.hasTemplates, true, 'the page drawer should hold the layout templates');
       assert.eq(r.settingsShowsProjectOnly, true,
         'the settings sheet must keep showing the project, never the page');
