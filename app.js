@@ -1425,7 +1425,11 @@ function syncPageDrawer() {
     return;
   }
   if (!wasShown) setPageDrawer(false);      // just appeared: start closed, not sprung open
-  $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) + ' (' + LABELS[state.active] + ')';
+  // LABELS is just the panel number for pages 2-7, so naming it again in
+  // parens would repeat the number that's already there; cover/back get one
+  // because their name isn't their number.
+  $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) +
+    (isNaN(LABELS[state.active]) ? ' (' + LABELS[state.active] + ')' : '');
   $('#pageInspector').innerHTML = pageSectionHtml(false);
   wireInspector($('#pageInspector'));
 }
