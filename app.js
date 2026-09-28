@@ -100,6 +100,10 @@ function unsafeEdges(pi) {
 }
 
 let selId = null, editingId = null, curZoom = 1;
+/* An element mid-drag across the fold is lent a second copy for the length of
+   the gesture, the same one a spanning element keeps, so that it visibly
+   crosses instead of vanishing into the gutter and reappearing. */
+let crossingId = null;
 const nodes = new Map(), guestNodes = new Map();
 let hist = [], future = [];
 
@@ -660,7 +664,7 @@ function guestsFor(pi) {
   const dx = -p.dx;                       // that page's origin, seen from here
   return doc().panels[p.pi].els
     .map((el, i) => ({ el: el, i: i, dx: dx }))
-    .filter(x => x.el.span);
+    .filter(x => x.el.span || x.el.id === crossingId);
 }
 
 /* Everything that paints on a panel, back to front: its own elements, with
@@ -887,13 +891,47 @@ function pageXY(ev, node) {
 const wrapDeg = d => Math.round(((d % 360) + 540) % 360 - 180);
 
 /* Elements may bleed off the edge — that is half the point of a zine — but
-   never so far that there is nothing left on the panel to grab. */
+   never so far that there is nothing left to grab. What they are kept inside
+   is the spread, not the one panel: the fold is not a wall, and an element
+   dragged over it belongs to the page it lands on. A phone showing one page
+   at a time is the exception, since there is no facing page on screen to drag
+   onto. Panel-local x, so the facing half sits above panelW for a left-hand
+   page and below zero for a right-hand one. */
 const KEEP = 20;
-function clampPos(el, node) {
+function spreadRange(pi) {
+  const g = geom();
+  const p = (narrow() && state.singleView) ? null : spanPartner(pi);
+  const lo = p ? Math.min(0, -p.dx) : 0;      // that page's origin, seen from here
+  return { lo: lo, hi: lo + (p ? 2 : 1) * g.panelW };
+}
+
+function clampPos(el, node, pi) {
   const g = geom();
   const h = el.type === 'text' ? (node ? node.offsetHeight : 0) : el.h;
-  el.x = Math.min(g.panelW - KEEP, Math.max(KEEP - el.w, el.x));
+  const f = pi == null ? findSel() : null;
+  const r = spreadRange(pi == null ? (f ? f.pi : state.active) : pi);
+  el.x = Math.min(r.hi - KEEP, Math.max(r.lo + KEEP - el.w, el.x));
   el.y = Math.min(g.panelH - KEEP, Math.max(KEEP - h, el.y));
+}
+
+/* Ownership follows the element's centre over the fold, so the handles are
+   always on the half you can actually grab and the coordinates stay
+   panel-local. It lands on top of its new page, where a new element would. */
+function rehome() {
+  const f = findSel();
+  if (!f || (narrow() && state.singleView)) return false;
+  const p = spanPartner(f.pi);
+  if (!p) return false;
+  const el = f.el, g = geom();
+  const gutter = p.dx < 0 ? g.panelW : 0;     // the fold, in this panel's own x
+  const cx = el.x + el.w / 2;
+  if (p.dx < 0 ? cx <= gutter : cx >= gutter) return false;
+  const from = doc().panels[f.pi];
+  from.els = from.els.filter(e => e.id !== el.id);
+  doc().panels[p.pi].els.push(el);
+  el.x += p.dx;
+  state.active = p.pi;
+  return true;
 }
 
 function rotVec(dx, dy, deg) {
@@ -914,7 +952,7 @@ function anchorFix(el, dw, dh) {
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
 let dragging = false;
-function drag(ev, onMove) {
+function drag(ev, onMove, onEnd) {
   const snap = JSON.stringify(state.docs);
   let moved = false;
   dragging = true;
@@ -940,7 +978,10 @@ function drag(ev, onMove) {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
-    if (moved) { paintStripSoon(); syncInspector(); save(); }
+    if (moved) {
+      if (onEnd) onEnd();
+      paintStripSoon(); syncInspector(); save();
+    }
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -968,6 +1009,9 @@ function onPagePointerDown(ev) {
   const pi = pd ? +pd.dataset.pi : state.active;
   if (!hit) { setActive(pi); stopEdit(); select(null); return; }
   const id = hit.dataset.id;
+  // The facing page's half of a spanning element, on a phone showing one page
+  // at a time: it prints here, but it is not this page's to edit.
+  if (!elById(id)) { setActive(pi); stopEdit(); select(null); return; }
   if (editingId === id && !handle) return;       // let the caret do its job
   ev.preventDefault();
   setActive(pi);                                 // both may rebuild every node
@@ -1018,15 +1062,22 @@ function onPagePointerDown(ev) {
     return;
   }
 
-  const start = pageXY(ev, node), x0 = el.x, y0 = el.y;
+  /* Deltas come straight off the pointer instead of through the element's own
+     panel, because crossing the fold repaints the sheet mid-drag and the node
+     this gesture started on is gone by then. */
+  const x0 = el.x, y0 = el.y, cx0 = ev.clientX, cy0 = ev.clientY;
+  let lent = false;
   drag(ev, e => {
-    const p = pageXY(e, node);
-    let dx = p.x - start.x, dy = p.y - start.y;
+    let dx = (e.clientX - cx0) / curZoom, dy = (e.clientY - cy0) / curZoom;
     if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+    if (!lent && !el.span) { lent = true; crossingId = el.id; paintPage(); }
     el.x = Math.round(x0 + dx);
     el.y = Math.round(y0 + dy);
-    clampPos(el, node);
+    clampPos(el, nodes.get(el.id));
     restyle(el);
+  }, () => {
+    crossingId = null;
+    if (rehome()) { buildInspector(); paintPage(); } else paintPage();
   });
 }
 
@@ -1058,7 +1109,7 @@ function onKey(e) {
     pushHistory();
     el.x += nudge[0]; el.y += nudge[1];
     clampPos(el, nodes.get(el.id));
-    restyle(el);
+    if (rehome()) { buildInspector(); paintPage(); } else restyle(el);
     paintStripSoon(); syncInspector(); save();
   }
 }
@@ -1135,6 +1186,9 @@ function inspectorForEl(el) {
       '<div class="col"><label class="f">Y</label><input class="num grow" type="number" data-k="y" data-num value="' + el.y + '"></div>' +
       '<div class="col"><label class="f">W</label><input class="num grow" type="number" data-k="w" data-num value="' + el.w + '"></div>' +
     '</div></div>' +
+    '<div class="grp"><label class="f">Across the fold</label><div class="seg" style="margin-bottom:8px">' +
+      '<button data-span="0"' + on(!el.span) + '>One page</button>' +
+      '<button data-span="1"' + on(!!el.span) + '>Both pages</button></div></div>' +
     '<div class="grp"><label class="f">Arrange</label><div class="seg" style="margin-bottom:8px">' +
       '<button data-layer="back">Back</button><button data-layer="-1">&minus;</button>' +
       '<button data-layer="1">+</button><button data-layer="front">Front</button></div>' +
@@ -1660,6 +1714,17 @@ function wireInspector(side) {
     node.addEventListener('change', () => { node._h = 0; apply(); });
     node.addEventListener('blur', () => { node._h = 0; });
   });
+
+  /* Spanning is the one property that changes what the fold does to an
+     element, so it repaints both halves rather than just restyling. */
+  side.querySelectorAll('[data-span]').forEach(b => b.addEventListener('click', () => {
+    const el = selected(); if (!el) return;
+    const v = b.getAttribute('data-span') === '1';
+    if (!!el.span === v) return;
+    pushHistory();
+    if (v) el.span = true; else delete el.span;
+    paintAll(); save();
+  }));
 
   side.querySelectorAll('[data-layer]').forEach(b => b.addEventListener('click', () => {
     const v = b.dataset.layer;

@@ -215,8 +215,8 @@
      empty paper still scrolls the stage. */
   .sheet .el { touch-action: none; }
   /* The continuation of a spanning element in the facing panel is a plain
-     copy: no handles, and hits belong to the element on its own page. */
-  .el.guest { pointer-events: none; }
+     copy — no handles of its own, but grabbing it grabs the element. */
+  .el.guest { cursor: move; }
   .el.sel { outline: calc(1.5px * var(--iz)) solid var(--accent2); }
   .el .ui { display: none; }
   .el.sel .ui { display: block; }

@@ -290,18 +290,224 @@ module.exports = {
       assert.eq(r.movedY, 0, 'the smaller axis should be pinned');
     });
 
-    t.check('elements cannot be dragged completely off the panel', async () => {
+    /* ------------------------------------------------ across the fold */
+
+    /* A spanning element is one element, painted twice. These check the
+       second copy is really a copy — same element, right offset, right panel
+       — rather than anything the document has to carry twice. */
+    t.check('spanning paints a second copy in the facing panel, one panel width over', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {
-        setActive(0); addText(); stopEdit();
-        const el = selected(), node = nodes.get(el.id);
+        setActive(0);                            // spread back|cover
+        const spread = visiblePanels();          // [7, 0]
+        const put = (pi, x) => {
+          doc().panels[pi].els.push({ id: 'e' + pi, type: 'text', x: x, y: 40, w: 90,
+            rot: 0, text: 'over the fold', font: 0, size: 12, color: '#111',
+            align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4,
+            span: true });
+        };
+        put(spread[0], geom().panelW - 40);      // left page, reaching right
+        put(spread[1], -40);                     // right page, reaching left
+        paintAll();
+        const g = geom();
+        const where = id => {
+          const gn = guestNodes.get(id);
+          // Compared as numbers: the browser rounds what it echoes back.
+          return { left: parseFloat(gn.style.left), panel: +gn.parentNode.dataset.pi };
+        };
+        return {
+          count: guestNodes.size,
+          fromLeft: where('e' + spread[0]),
+          fromRight: where('e' + spread[1]),
+          wantLeft: g.panelW - 40 - g.panelW,
+          wantRight: -40 + g.panelW,
+          leftPanel: spread[0], rightPanel: spread[1]
+        };
+      })()`);
+      assert.eq(r.count, 2, 'both spanning elements should be lent to the facing page');
+      assert.near(r.fromLeft.left, r.wantLeft, 0.01, 'a left-hand page reaches right, so its copy sits back a panel');
+      assert.eq(r.fromLeft.panel, r.rightPanel, 'and the copy belongs to the right-hand page');
+      assert.near(r.fromRight.left, r.wantRight, 0.01, 'a right-hand page reaches left, so its copy sits forward a panel');
+      assert.eq(r.fromRight.panel, r.leftPanel, 'and that copy belongs to the left-hand page');
+    });
+
+    t.check('an element that does not span is clipped at the fold, with no copy', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const left = visiblePanels()[0];
+        doc().panels[left].els.push({ id: 'plain', type: 'text', x: geom().panelW - 40,
+          y: 40, w: 90, rot: 0, text: 'clipped', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        paintAll();
+        return guestNodes.size;
+      })()`);
+      assert.eq(r, 0, 'only a spanning element is painted on the facing page');
+    });
+
+    t.check('the inspector toggles spanning, and undo takes it back', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0); addText(); stopEdit(); buildInspector();
+        const el = selected();
+        const press = v => {
+          document.querySelector('#inspector [data-span="' + v + '"]').click();
+          buildInspector();
+        };
+        press('1');
+        const on = { span: el.span, copies: guestNodes.size,
+                     marked: !!document.querySelector('#inspector [data-span="1"].on') };
+        press('0');
+        const off = { span: selected().span, copies: guestNodes.size };
+        press('1');
+        undo();
+        return { on: on, off: off, afterUndo: !!(elById(el.id) || {}).span };
+      })()`);
+      assert.eq(r.on.span, true, 'pressing "Both pages" sets it');
+      assert.eq(r.on.copies, 1, 'and the facing page gets the copy immediately');
+      assert.eq(r.on.marked, true, 'the pressed button reads as chosen');
+      assert.eq(r.off.span, undefined, 'pressing "One page" drops the flag rather than storing a false');
+      assert.eq(r.off.copies, 0, 'and takes the copy away');
+      assert.eq(r.afterUndo, false, 'undo puts it back the way it was');
+    });
+
+    /* The fold is not a wall: drag an element over it and it changes pages.
+       Coordinates are panel-local, so the handover has to shift x by exactly
+       one panel width or the element would jump. */
+    t.check('dragging an element over the fold hands it to the facing page', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0], right = spread[1];
+        const g = geom();
+        doc().panels[left].els.push({ id: 'cross', type: 'text', x: g.panelW - 60, y: 40,
+          w: 100, rot: 0, text: 'moving in', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        setActive(left); paintAll();
+        const el = doc().panels[left].els[0], node = nodes.get('cross');
+        const box = node.getBoundingClientRect();
+        const x0 = el.x;
+        ${GESTURE}(node, box.left + 5, box.top + 5, box.left + 5 + 30 * curZoom, box.top + 5);
+        return {
+          onLeft: doc().panels[left].els.length, onRight: doc().panels[right].els.length,
+          x: Math.round(el.x), want: Math.round(x0 + 30 - g.panelW),
+          active: state.active, right: right, stillSelected: selId === 'cross'
+        };
+      })()`);
+      assert.eq(r.onLeft, 0, 'it should have left the page it started on');
+      assert.eq(r.onRight, 1, 'and arrived on the facing one');
+      assert.eq(r.x, r.want, 'its x shifts by exactly one panel width');
+      assert.eq(r.active, r.right, 'the page it landed on takes over as the active one');
+      assert.eq(r.stillSelected, true, 'and it stays selected through the handover');
+    });
+
+    t.check('a right-hand page hands elements back the other way', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0], right = spread[1];
+        const g = geom();
+        doc().panels[right].els.push({ id: 'back', type: 'text', x: 10, y: 40, w: 100,
+          rot: 0, text: 'moving out', font: 0, size: 12, color: '#111', align: 'left',
+          lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        setActive(right); paintAll();
+        const el = doc().panels[right].els[0], node = nodes.get('back');
+        const box = node.getBoundingClientRect();
+        const x0 = el.x;
+        ${GESTURE}(node, box.left + 5, box.top + 5, box.left + 5 - 80 * curZoom, box.top + 5);
+        return {
+          onLeft: doc().panels[left].els.length, onRight: doc().panels[right].els.length,
+          x: Math.round(el.x), want: Math.round(x0 - 80 + g.panelW), active: state.active, left: left
+        };
+      })()`);
+      assert.eq(r.onRight, 0, 'it should have left the right-hand page');
+      assert.eq(r.onLeft, 1, 'and arrived on the left-hand one');
+      assert.eq(r.x, r.want, 'its x shifts back by exactly one panel width');
+      assert.eq(r.active, r.left, 'the page it landed on takes over');
+    });
+
+    t.check('an element dragged short of the fold stays where it is', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const left = visiblePanels()[0], g = geom();
+        doc().panels[left].els.push({ id: 'stay', type: 'text', x: g.panelW - 60, y: 40,
+          w: 100, rot: 0, text: 'not yet', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        setActive(left); paintAll();
+        const node = nodes.get('stay');
+        const box = node.getBoundingClientRect();
+        // Centre still short of the fold: 10pt is not enough to carry it over.
+        ${GESTURE}(node, box.left + 5, box.top + 5, box.left + 5 + 5 * curZoom, box.top + 5);
+        return { onLeft: doc().panels[left].els.length, active: state.active, left: left };
+      })()`);
+      assert.eq(r.onLeft, 1, 'ownership follows the centre, and the centre has not crossed');
+      assert.eq(r.active, r.left, 'so the active page does not change either');
+    });
+
+    t.check('an element still cannot be dragged off the far side of the spread', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const left = visiblePanels()[0];
+        doc().panels[left].els.push({ id: 'far', type: 'text', x: 30, y: 40, w: 100,
+          rot: 0, text: 'runaway', font: 0, size: 12, color: '#111', align: 'left',
+          lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        setActive(left); paintAll();
+        const el = doc().panels[left].els[0], node = nodes.get('far');
         const box = node.getBoundingClientRect();
         ${GESTURE}(node, box.left + 5, box.top + 5, box.left - 4000, box.top - 4000);
-        const g = geom();
-        return { x: el.x, y: el.y, minX: 20 - el.w };
+        return { x: el.x, y: el.y, minX: 20 - el.w,
+                 stillHome: doc().panels[left].els.length };
       })()`);
-      assert.ok(r.x >= r.minX, 'x ran away to ' + r.x);
+      assert.ok(r.x >= r.minX, 'x ran off the outer edge to ' + r.x);
       assert.ok(r.y > -1000, 'y ran away to ' + r.y);
+      assert.eq(r.stillHome, 1, 'there is no page out that way to hand it to');
+    });
+
+    t.check('grabbing the borrowed half selects the element on its own page', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0];
+        doc().panels[left].els.push({ id: 'reach', type: 'text', x: geom().panelW - 30,
+          y: 40, w: 120, rot: 0, text: 'reaching', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4,
+          span: true });
+        setActive(left); paintAll(); select(null);
+        const gn = guestNodes.get('reach');
+        const box = gn.getBoundingClientRect();
+        gn.dispatchEvent(new PointerEvent('pointerdown', { clientX: box.left + 4,
+          clientY: box.top + 4, button: 0, buttons: 1, bubbles: true }));
+        window.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true }));
+        return { selected: selId, owner: doc().panels[left].els.length,
+                 handles: !!nodes.get('reach') };
+      })()`);
+      assert.eq(r.selected, 'reach', 'the copy answers for the element it is a copy of');
+      assert.eq(r.owner, 1, 'and grabbing it does not move the element anywhere');
+      assert.eq(r.handles, true, 'the handles stay on its own page');
+    });
+
+    t.check('typing in a spanning text box updates the half across the fold', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const left = visiblePanels()[0];
+        doc().panels[left].els.push({ id: 'say', type: 'text', x: geom().panelW - 30,
+          y: 40, w: 140, rot: 0, text: 'before', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4,
+          span: true });
+        setActive(left); paintAll();
+        startEdit('say', true);
+        const body = nodes.get('say').querySelector('.body');
+        body.textContent = 'after the fold';
+        body.dispatchEvent(new Event('input', { bubbles: true }));
+        return { stored: elById('say').text,
+                 copy: guestNodes.get('say').querySelector('.body').textContent };
+      })()`);
+      assert.eq(r.stored, 'after the fold', 'the element itself keeps the text');
+      assert.eq(r.copy, 'after the fold',
+        'and the copy is told by hand, since the caret stops the sheet rebuilding');
     });
 
     t.check('clicking the blank stage clears the selection', async () => {
