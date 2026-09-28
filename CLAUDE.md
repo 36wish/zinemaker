@@ -206,12 +206,29 @@ Two things measured rather than assumed, both in `print.test.js`:
 - A block straddling the fold rasters as **one** unbroken run of ink, full width,
   centred on the crease — checked for both rotations and for an element owned by
   either half, because each has its own sign.
-- The join keeps one antialiased pixel where the rasteriser composites the second
-  panel's clipped edge over the first. That is **the panel model's, not the span's**:
-  two plain adjacent panels of the same colour, with no spanning element anywhere,
-  already do it, which is what the control in that test measures. Do not chase it by
-  rounding panel geometry — a panel is exactly a quarter of the sheet. The test only
-  asks that the fold never open into paper white.
+- The join keeps one lighter pixel on the fold, and **this is known, measured and
+  deliberately left alone**. The two clipped halves do not quite cover the device
+  pixel they share, so whatever is under them shows through: about 48 of 255 through
+  black ink at 300 dpi, one pixel wide (0.085 mm), and it survives the PDF's JPEG at
+  quality 0.94. It is the panel model's, not the span's — two plain adjacent panels
+  of the same colour leave 27 the same way with nothing crossing them, which is what
+  the control in that test measures.
+
+  Before trying to fix it, know what has already been ruled out. It is a real
+  geometric residue, not sequential-compositing loss, so nothing that only reorders
+  or recolours the layers touches it — only ink drawn across that pixel *without* a
+  clip fills it. Laying the element down a third time underneath, across the whole
+  spread, and moving the two panels' backgrounds onto that bed so they stop painting
+  paper into the residue, does work: 48 → 0, measured. It was still not kept, because
+  making those panels transparent is what lets the bed show through, and it then
+  shows through *everywhere*, not just in the residue — so anything translucent or
+  soft-edged renders doubled (an `opacity: 0.5` element composites to 0.75, and a
+  scaled image's soft edge reads about 0.6 pt wider). Trading a hairline for wrong
+  opacity is a bad trade. Do not chase it by rounding panel geometry either — a
+  panel is exactly a quarter of the sheet. The honest fix is to stop clipping per
+  panel: one spread-wide box with a `clip-path` per element, so a spanning element
+  simply has no clip and nothing is ever drawn twice. That is a rewrite of the
+  rendering model, not a patch.
 
 ### Small screens
 
