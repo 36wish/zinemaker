@@ -369,7 +369,13 @@ function layer(dir) {
 
 /* Slot geometry is in fractions of the panel, so one table serves both the
    panels of any paper size. Text sizes are fractions of
-   the panel width for the same reason. */
+   the panel width for the same reason.
+
+   A template marked `spread` measures x and w across both facing pages
+   instead — 0 is the left-hand page's left edge and 2 is the right-hand
+   page's right edge — and everything it places spans the fold. Heights and
+   text sizes stay panel-relative, so type does not double when a layout goes
+   wide. */
 const TEMPLATES = [
   { n: 'Cover', slots: [
     { t: 'image', x: 0, y: 0, w: 1, h: .58 },
@@ -428,6 +434,13 @@ const TEMPLATES = [
     { t: 'text', x: .5, y: .8, w: .45, size: .05, font: 5, align: 'center', rot: 4,
       bg: '#ffffff', text: 'cut + paste' }
   ] },
+  { n: 'Across the fold', spread: true, slots: [
+    { t: 'image', x: 0, y: 0, w: 2, h: 1 }
+  ] },
+  { n: 'Wide photo', spread: true, slots: [
+    { t: 'image', x: .06, y: .08, w: 1.88, h: .66 },
+    { t: 'text', x: .14, y: .8, w: 1.72, size: .045, font: 2, align: 'center', text: 'caption' }
+  ] },
   { n: 'Back + QR', slots: [
     { t: 'text', x: .1, y: .12, w: .8, size: .055, font: 4, align: 'center', text: 'THANKS' },
     { t: 'qr', x: .3, y: .34, w: .4 },
@@ -463,6 +476,11 @@ function applyTemplate(tpl) {
   const pool = { text: [], image: [], qr: [] };
   p.els.forEach(e => { if (pool[e.type]) pool[e.type].push(e); });
 
+  /* A spread layout is laid out from the left-hand page's left edge, so on a
+     right-hand page the whole thing shifts back by a panel to land there. */
+  const originX = tpl.spread && SPREADS.find(p => p.indexOf(state.active) >= 0)[1] === state.active
+    ? -g.panelW : 0;
+
   const placed = [], used = {};
   tpl.slots.forEach(s => {
     let el = pool[s.t].shift();
@@ -471,10 +489,11 @@ function applyTemplate(tpl) {
       el = slotDefault(s);
     }
     used[el.id] = 1;
-    el.x = Math.round(s.x * g.panelW);
+    el.x = Math.round(s.x * g.panelW + originX);
     el.y = Math.round(s.y * g.panelH);
     el.w = Math.round(s.w * g.panelW);
     el.rot = s.rot || 0;
+    if (tpl.spread) el.span = true; else delete el.span;
     if (s.t === 'image') el.h = Math.round(s.h * g.panelH);
     if (s.t === 'qr') el.h = el.w;
     if (s.t === 'text') {
@@ -1269,10 +1288,10 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 /* Little diagram of a template's slots, drawn from the same numbers that
    position the real elements. */
 function templateThumb(tpl) {
-  const W = 44, H = 62;
+  const P = 44, H = 62, W = tpl.spread ? P * 2 : P;
   let r = '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fff"/>';
   tpl.slots.forEach(s => {
-    const x = s.x * W, y = s.y * H, w = s.w * W;
+    const x = s.x * P, y = s.y * H, w = s.w * P;
     const rot = s.rot ? ' transform="rotate(' + s.rot + ' ' + (x + w / 2) + ' ' + (y + 4) + ')"' : '';
     if (s.t === 'image') {
       r += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + (s.h * H) +
@@ -1290,6 +1309,10 @@ function templateThumb(tpl) {
       }
     }
   });
+  if (tpl.spread) {
+    r += '<line x1="' + P + '" y1="0" x2="' + P + '" y2="' + H +
+         '" stroke="#fff" stroke-width="1" stroke-dasharray="2 2"/>';
+  }
   return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + r + '</svg>';
 }
 
@@ -1371,10 +1394,23 @@ function helpHtml() {
       '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
       'to 15&deg;. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes.</p>' +
 
+    '<h3>Across the fold</h3>' +
+    '<p>Pick a photo or a line of text and press <b>Both pages</b> to run it ' +
+      'over the fold. It still belongs to one page &mdash; that is where its ' +
+      'handles are &mdash; but it prints straight through the crease onto the ' +
+      'facing one, because the two pages of a spread sit side by side on the ' +
+      'sheet. Drag anything over the fold and it moves to the page it lands on.</p>' +
+    '<p>The fold itself takes a little: expect a hair of the picture to ' +
+      'disappear into the crease, and how squarely the halves line up depends on ' +
+      'how squarely you fold. Faces and words land badly in the middle &mdash; ' +
+      'give the fold sky, or a gap between words. A QR code across the fold will ' +
+      'usually not scan at all.</p>' +
+
     '<h3>Layouts</h3>' +
     '<p>A layout pours what is already on the page into its slots &mdash; photos ' +
       'and text in the order you added them. Anything left over stays where it ' +
-      'was, and an empty photo slot is left empty.</p>' +
+      'was, and an empty photo slot is left empty. The two wide layouts fill the ' +
+      'whole spread rather than the one page.</p>' +
 
     '<h3>QR codes</h3>' +
     '<p>Keep a QR code at least 20 mm wide with a pale background behind it, and ' +

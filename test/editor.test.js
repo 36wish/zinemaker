@@ -675,6 +675,40 @@ module.exports = {
       assert.eq(r.madeQr, true);
     });
 
+    /* A wide layout is measured from the left-hand page's left edge, so the
+       same table has to land correctly whichever half of the spread is
+       active — on a right-hand page everything shifts back by a panel. */
+    t.check('a wide layout fills the spread from either half of it', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        const i = TEMPLATES.findIndex(t => t.spread);
+        const g = geom();
+        const px = ${pngDataUrl('#336699')};
+        const run = pi => {
+          setActive(pi);
+          panel().els = [{ id: 'photo' + pi, type: 'image', x: 0, y: 0, w: 40, h: 40,
+            rot: 0, src: px, fit: 'cover', filter: 'none', opacity: 1, radius: 0 }];
+          applyTemplate(TEMPLATES[i]);
+          const el = doc().panels[pi].els[0];
+          return { x: Math.round(el.x), w: Math.round(el.w), span: !!el.span };
+        };
+        const spread = SPREADS[0];                 // [7, 0]: back then cover
+        const left = run(spread[0]), right = run(spread[1]);
+        // and a one-page layout puts it back
+        setActive(spread[0]);
+        applyTemplate(TEMPLATES.find(t => !t.spread && t.slots.some(s => s.t === 'image')));
+        return { left: left, right: right, panelW: Math.round(g.panelW),
+                 twoPanels: Math.round(g.panelW * 2),
+                 afterPlain: !!doc().panels[spread[0]].els[0].span };
+      })()`);
+      assert.eq(r.left.span, true, 'a wide layout spans');
+      assert.eq(r.left.w, r.twoPanels, 'and is two panels wide');
+      assert.eq(r.left.x, 0, 'from a left-hand page it starts at that page own edge');
+      assert.eq(r.right.x, -r.panelW, 'from a right-hand page it starts a panel back');
+      assert.eq(r.right.w, r.twoPanels, 'the same two panels either way');
+      assert.eq(r.afterPlain, false, 'a one-page layout takes the spanning back off');
+    });
+
     t.check('every template applies cleanly to every panel', async () => {
       await page.reset();
       const err = await page.evaluate(`(() => {
