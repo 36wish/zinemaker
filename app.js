@@ -100,7 +100,7 @@ function unsafeEdges(pi) {
 }
 
 let selId = null, editingId = null, curZoom = 1;
-const nodes = new Map();
+const nodes = new Map(), guestNodes = new Map();
 let hist = [], future = [];
 
 const doc = () => state.docs.mini;
@@ -191,7 +191,11 @@ function fixDoc(d, n) {
     out.panels[i].bg = src[i].bg || '#ffffff';
     out.panels[i].els = (Array.isArray(src[i].els) ? src[i].els : [])
       .filter(e => e && (e.type === 'text' || e.type === 'image' || e.type === 'qr'))
-      .map(e => Object.assign({}, e, { id: e.id || uid() }));
+      .map(e => {
+        const c = Object.assign({}, e, { id: e.id || uid() });
+        if (c.span) c.span = true; else delete c.span;   // never store the false
+        return c;
+      });
   }
   return out;
 }
@@ -550,9 +554,11 @@ function paintQr(node, el) {
   node.replaceChild(svg, old);
 }
 
-function styleNode(node, el) {
+/* dx offsets this copy of the element: zero on its own page, one panel width
+   for the continuation painted in the facing panel (see spanPartner). */
+function styleNode(node, el, dx) {
   const s = node.style;
-  s.left = el.x + 'px';
+  s.left = (el.x + (dx || 0)) + 'px';
   s.top = el.y + 'px';
   s.width = el.w + 'px';
   s.height = el.type === 'text' ? 'auto' : el.h + 'px';
@@ -581,7 +587,7 @@ function styleNode(node, el) {
   }
 }
 
-function makeNode(el, interactive) {
+function makeNode(el, interactive, dx) {
   const d = document.createElement('div');
   d.className = 'el el-' + el.type;
   d.dataset.id = el.id;
@@ -608,7 +614,7 @@ function makeNode(el, interactive) {
                    (el.type === 'text' ? '' : '<div class="h se"></div>');
     d.appendChild(ui);
   }
-  styleNode(d, el);
+  styleNode(d, el, dx);
   return d;
 }
 
@@ -629,18 +635,61 @@ function chopBands(pi) {
   return wrap.firstChild ? wrap : null;
 }
 
+/* Facing pages are adjacent cells in the same row of the sheet, at the same
+   rotation and in reading order (see IMPOSE and the check in print.test.js),
+   so the two halves of a spread are physically continuous on the paper. That
+   is what makes spanning cheap: an element with span set stays owned by one
+   panel, in that panel's own coordinates, and is simply painted a second time
+   in the facing panel shifted by one panel width. Each panel goes on clipping
+   itself, so nothing leaks onto a page that is not facing, and the two clipped
+   halves meet exactly at the fold.
+
+   Returns the facing panel and the offset to draw this panel's elements at
+   when they are painted over there. */
+function spanPartner(pi) {
+  const s = SPREADS.find(p => p.indexOf(pi) >= 0);
+  if (!s) return null;
+  return { pi: s[0] === pi ? s[1] : s[0], dx: (s[0] === pi ? -1 : 1) * geom().panelW };
+}
+
+/* What the facing page lends this one, with the layer index it holds over
+   there — a spanning element keeps its layer number on both pages. */
+function guestsFor(pi) {
+  const p = spanPartner(pi);
+  if (!p) return [];
+  const dx = -p.dx;                       // that page's origin, seen from here
+  return doc().panels[p.pi].els
+    .map((el, i) => ({ el: el, i: i, dx: dx }))
+    .filter(x => x.el.span);
+}
+
+/* Everything that paints on a panel, back to front: its own elements, with
+   the facing page's spanning ones spliced in at that same layer index. */
+function paintList(pi) {
+  const out = doc().panels[pi].els.map(el => ({ el: el, dx: 0 }));
+  guestsFor(pi).forEach(g => out.splice(Math.min(g.i, out.length), 0, { el: g.el, dx: g.dx }));
+  return out;
+}
+
+/* Both copies of an element move together — the one on its own page and the
+   continuation across the gutter. */
+function restyle(el) {
+  const n = nodes.get(el.id);
+  if (n) styleNode(n, el, 0);
+  const gn = guestNodes.get(el.id);
+  if (gn) styleNode(gn, el, +gn.dataset.dx);
+}
+
 function paintPage() {
   const sheet = $('#sheet'), g = geom(), list = visiblePanels();
   sheet.style.width = g.panelW * list.length + 'px';
   sheet.style.height = g.panelH + 'px';
 
   if (editingId) {                       // never rebuild under a live caret
-    list.forEach(pi => doc().panels[pi].els.forEach(el => {
-      const n = nodes.get(el.id);
-      if (n) styleNode(n, el);
-    }));
+    list.forEach(pi => paintList(pi).forEach(it => restyle(it.el)));
   } else {
     nodes.clear();
+    guestNodes.clear();
     sheet.textContent = '';
     list.forEach(pi => {
       const p = doc().panels[pi];
@@ -650,9 +699,16 @@ function paintPage() {
       pd.style.width = g.panelW + 'px';
       pd.style.height = g.panelH + 'px';
       pd.style.background = p.bg;
-      p.els.forEach(el => {
-        const n = makeNode(el, true);
-        nodes.set(el.id, n);
+      paintList(pi).forEach(it => {
+        const own = !it.dx;
+        const n = makeNode(it.el, own, it.dx);
+        if (own) {
+          nodes.set(it.el.id, n);
+        } else {
+          n.classList.add('guest');
+          n.dataset.dx = it.dx;
+          guestNodes.set(it.el.id, n);
+        }
         pd.appendChild(n);
       });
       const chop = chopBands(pi);
@@ -660,7 +716,7 @@ function paintPage() {
       sheet.appendChild(pd);
     });
   }
-  nodes.forEach((n, id) => n.classList.toggle('sel', id === selId));
+  markSelected();
   $('#spine').classList.toggle('on', list.length === 2);
   paintLabels(list);
   fitZoom();
@@ -736,7 +792,7 @@ function paintStrip() {
     mini.className = 'panel';
     mini.style.cssText = 'width:' + g.panelW + 'px;height:' + g.panelH + 'px;' +
                          'background:' + p.bg + ';transform:scale(' + tz + ')';
-    p.els.forEach(el => mini.appendChild(makeNode(el, false)));
+    paintList(i).forEach(it => mini.appendChild(makeNode(it.el, false, it.dx)));
     tp.appendChild(mini);
     const lbl = document.createElement('span');
     lbl.className = 'tl';
@@ -760,11 +816,16 @@ function paintAll() { paintPage(); paintStrip(); buildInspector(); }
 
 /* ------------------------------------------------------------- interaction */
 
+function markSelected() {
+  nodes.forEach((n, k) => n.classList.toggle('sel', k === selId));
+  guestNodes.forEach((n, k) => n.classList.toggle('sel', k === selId));
+}
+
 function select(id) {
   if (selId === id) return;
   if (editingId && editingId !== id) stopEdit();
   selId = id;
-  nodes.forEach((n, k) => n.classList.toggle('sel', k === id));
+  markSelected();
   buildInspector();
 }
 
@@ -793,6 +854,10 @@ function startEdit(id, selectAll) {
   sel.removeAllRanges(); sel.addRange(range);
   body.oninput = () => {
     el.text = body.innerText.replace(/\u00a0/g, ' ');
+    // paintPage() will not rebuild under the caret, so the copy across the
+    // gutter has to be told by hand.
+    const gn = guestNodes.get(id);
+    if (gn) gn.querySelector('.body').textContent = el.text;
     paintStripSoon(); save();
   };
 }
@@ -925,7 +990,7 @@ function onPagePointerDown(ev) {
       let a = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI + 90;
       if (e.shiftKey) a = Math.round(a / 15) * 15;
       el.rot = wrapDeg(a);
-      styleNode(node, el);
+      restyle(el);
     });
     return;
   }
@@ -948,7 +1013,7 @@ function onPagePointerDown(ev) {
       anchorFix(el, w - el.w, dh);
       el.w = w;
       if (el.type === 'image') el.h = h;
-      styleNode(node, el);
+      restyle(el);
     });
     return;
   }
@@ -961,8 +1026,7 @@ function onPagePointerDown(ev) {
     el.x = Math.round(x0 + dx);
     el.y = Math.round(y0 + dy);
     clampPos(el, node);
-    node.style.left = el.x + 'px';
-    node.style.top = el.y + 'px';
+    restyle(el);
   });
 }
 
@@ -994,7 +1058,7 @@ function onKey(e) {
     pushHistory();
     el.x += nudge[0]; el.y += nudge[1];
     clampPos(el, nodes.get(el.id));
-    styleNode(nodes.get(el.id), el);
+    restyle(el);
     paintStripSoon(); syncInspector(); save();
   }
 }
@@ -1737,7 +1801,7 @@ function buildSheetNode() {
     pn.style.cssText = 'position:absolute;left:' + (g.offsetX + c.col * g.panelW) + 'px;top:' +
       (g.offsetY + c.row * g.panelH) + 'px;width:' + g.panelW + 'px;height:' + g.panelH +
       'px;background:' + p.bg + ';transform:rotate(' + c.rot + 'deg)';
-    p.els.forEach(el => pn.appendChild(makeNode(el, false)));
+    paintList(c.i).forEach(it => pn.appendChild(makeNode(it.el, false, it.dx)));
     block.appendChild(pn);
   });
 

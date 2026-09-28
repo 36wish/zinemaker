@@ -61,6 +61,20 @@ module.exports = {
       assert.eq(s, '[[7,0],[1,2],[3,4],[5,6]]', 'back|cover, 2|3, 4|5, 6|7');
     });
 
+    /* The premise the whole spanning feature rests on: if these two cells were
+       ever not adjacent, or not co-rotated, or the left page sat on the wrong
+       side, a cross-gutter image would print in two pieces facing opposite
+       ways. Derived straight from IMPOSE, so it fails the moment either moves. */
+    t.check('each spread is two adjacent cells, co-rotated, left page first', async () => {
+      const r = await page.evaluate(`(() => SPREADS.map(function (s) {
+        const a = IMPOSE[s[0]], b = IMPOSE[s[1]];
+        const ok = a.row === b.row && a.rot === b.rot &&
+                   b.col === a.col + (a.rot === 0 ? 1 : -1);
+        return LABELS[s[0]] + '|' + LABELS[s[1]] + ':' + (ok ? 'ok' : 'BROKEN');
+      }).join(' '))()`);
+      assert.eq(r, 'back|cover:ok 2|3:ok 4|5:ok 6|7:ok');
+    });
+
     t.check('the clipped edge of each panel accounts for the upside-down row', async () => {
       await page.reset();
       const edges = await page.evaluate(`(() => state.docs.mini.panels.map((_, i) => {
@@ -199,6 +213,98 @@ module.exports = {
       assert.eq(seams.horizontal.length, 1, 'one horizontal seam, got ' + seams.horizontal.join(', '));
       assert.near(seams.horizontal[0], 105, 0.3, 'horizontal seam');
     });
+
+    /* Content across the gutter. A spanning element is painted twice — once on
+       its own page, once in the facing panel shifted by a panel width — and
+       each panel goes on clipping itself, so the proof is in the raster: a
+       block straddling the fold has to come back as ONE unbroken run of ink
+       the full width it was given. Half of it means the facing panel never got
+       its copy, and two runs mean the halves do not meet at all.
+
+       The join is not asked to be perfect, because it cannot be: two plain
+       adjacent panels of the same colour, with no spanning element anywhere,
+       already leave one antialiased pixel on the seam where the rasteriser
+       composites the second panel's clipped edge over the first. The control
+       below measures exactly that, and it is a property of the panel model,
+       not of spanning. What matters is that the fold never opens into paper
+       white — one pixel of dark grey on the crease is a crease; anything
+       approaching 255 is a gap where the two halves failed to meet. */
+    const straddle = owner => `(async () => {
+      const black = ${pngDataUrl('#000000')};
+      state.cut = false; state.guides = false; state.margin = 0; state.trimMargin = false;
+      const g = geom(), W = 40, ptToPx = 300 / 72;
+      const spread = SPREADS.find(s => s.indexOf(${owner}) >= 0);
+      const partner = spread[0] === ${owner} ? spread[1] : spread[0];
+      const y = Math.round((IMPOSE[${owner}].row + 0.5) * g.panelH * ptToPx);
+      // The two cells are adjacent, so the fold between them falls on the
+      // outer of the two column lines.
+      const gutter = Math.max(IMPOSE[${owner}].col, IMPOSE[partner].col) * g.panelW;
+
+      const scan = async () => {
+        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, ptToPx);
+        return cv.getContext('2d').getImageData(0, y, cv.width, 1).data;
+      };
+
+      state.docs.mini.panels.forEach(p => { p.els = []; p.bg = '#ffffff'; });
+      // Straddle the fold: it is the far edge of a left page, the near edge
+      // of a right one.
+      const x = (spread[0] === ${owner} ? g.panelW : 0) - W / 2;
+      state.docs.mini.panels[${owner}].els.push({
+        id: 'sp', type: 'image', x: x, y: g.panelH * 0.3,
+        w: W, h: g.panelH * 0.4, rot: 0,
+        src: black, fit: 'cover', filter: 'none', opacity: 1, radius: 0, span: true
+      });
+      const row = await scan();
+
+      // Same fold, same ink, no element anywhere: whatever this leaves on the
+      // seam is the rasteriser's, not the span's.
+      state.docs.mini.panels.forEach(p => { p.els = []; p.bg = '#000000'; });
+      const ctrlRow = await scan();
+      let control = 0;
+      for (let i = Math.round(gutter * ptToPx) - 3; i <= Math.round(gutter * ptToPx) + 3; i++) {
+        control = Math.max(control, ctrlRow[i * 4]);
+      }
+
+      const runs = [];
+      let start = -1;
+      for (let i = 0; i <= row.length / 4; i++) {
+        const v = i < row.length / 4 ? row[i * 4] : 255;
+        if (v < 200) { if (start < 0) start = i; }
+        else if (start >= 0) { runs.push([start, i]); start = -1; }
+      }
+      let lightest = -1;
+      if (runs.length === 1) {
+        lightest = 0;
+        for (let i = runs[0][0] + 2; i < runs[0][1] - 2; i++) lightest = Math.max(lightest, row[i * 4]);
+      }
+      return {
+        runs: runs.map(r => [+(r[0] / ptToPx).toFixed(2), +(r[1] / ptToPx).toFixed(2)]),
+        lightest: lightest, control: control, gutter: +gutter.toFixed(2)
+      };
+    })()`;
+
+    const checkStraddle = async (label, owner) => {
+      await page.reset({ margin: 0, cut: false, guides: false });
+      const r = await page.evaluate(straddle(owner));
+      assert.eq(r.runs.length, 1,
+        label + ': ink should cross the fold in one piece, got ' + JSON.stringify(r.runs));
+      assert.near(r.runs[0][0], r.gutter - 20, 0.5, label + ': ink starts 20pt before the fold');
+      assert.near(r.runs[0][1], r.gutter + 20, 0.5, label + ': ink ends 20pt after the fold');
+      assert.ok(r.lightest < 96, label + ': the fold opens into paper rather than holding ink — ' +
+        'lightest pixel across the join is ' + r.lightest + ', against ' + r.control +
+        ' for the seam two plain panels leave on their own');
+    };
+
+    // Both rotations and both roles, because each carries its own sign: the
+    // top row prints upside down, and a right-hand page spans backwards.
+    t.check('a block straddling the fold prints in one piece (6|7, upright)',
+      () => checkStraddle('6|7 left page', 5));
+    t.check('a block straddling the fold prints in one piece (2|3, upside down)',
+      () => checkStraddle('2|3 left page', 1));
+    t.check('a right-hand page spans backwards across the fold just as well',
+      () => checkStraddle('back|cover right page', 0));
+    t.check('a right-hand page on the upside-down row spans backwards too',
+      () => checkStraddle('4|5 right page', 4));
 
     t.check('the cut line prints along the middle two columns only', async () => {
       await page.reset({ margin: 0, cut: true, guides: false });
