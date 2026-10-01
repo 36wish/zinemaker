@@ -173,13 +173,13 @@ module.exports = {
         return { pageText: pageText, projectText: projectText };
       })()`);
       assert.eq(/mm/.test(r.pageText), false, 'the page panel should no longer mention panel dimensions');
-      assert.ok(/Each panel prints .*mm/.test(r.projectText),
+      assert.ok(/Each page prints .*mm/.test(r.projectText),
         'the printer-margin section should state the panel size, got: ' + r.projectText);
     });
 
     t.check('the panel dimensions in project settings track the trim setting', async () => {
       await page.reset({ margin: 10, trimMargin: false });
-      const dims = t => /Each panel prints ([^.]*)\./.exec(t)[1];
+      const dims = t => /Each page prints ([^.]*)\./.exec(t)[1];
       const r = await page.evaluate(`(() => {
         setSide(true);
         const before = document.getElementById('inspector').textContent;
@@ -657,21 +657,29 @@ module.exports = {
       assert.eq(r.spareUntouched, true, 'content with no slot stays where it was');
     });
 
-    t.check('a template with nothing to pour makes placeholders, not empty photos', async () => {
+    t.check('a template with nothing to pour leaves empty photo frames and placeholder text', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {
         setActive(4);
         applyTemplate(TEMPLATES.find(x => x.n === 'Four up'));
-        const a = { images: panel().els.filter(e => e.type === 'image').length,
-                    texts: panel().els.filter(e => e.type === 'text').length };
+        const imgs = panel().els.filter(e => e.type === 'image');
+        const a = { frames: imgs.length, allEmpty: imgs.every(e => e.src === ''),
+                    texts: panel().els.filter(e => e.type === 'text').length,
+                    drawn: document.querySelectorAll('.el.empty .frame-hint').length };
+        // applying again reuses the frames rather than stacking more
+        applyTemplate(TEMPLATES.find(x => x.n === 'Stacked'));
+        a.reused = panel().els.filter(e => e.type === 'image').length;
         setActive(7);
         applyTemplate(TEMPLATES.find(x => x.n === 'Back + QR'));
         const qr = panel().els.find(e => e.type === 'qr');
         a.madeQr = !!qr && qr.w === qr.h;
         return a;
       })()`);
-      assert.eq(r.images, 0, 'an empty photo slot must not invent an image');
+      assert.eq(r.frames, 4, 'each photo slot gets a frame to fill');
+      assert.eq(r.allEmpty, true, 'and the frames carry no invented image');
+      assert.eq(r.drawn, 4, 'each is drawn with its "Add photo" prompt on screen');
       assert.eq(r.texts, 1);
+      assert.eq(r.reused, 4, 'a second layout pours the same frames, leaving the spares in place');
       assert.eq(r.madeQr, true);
     });
 
