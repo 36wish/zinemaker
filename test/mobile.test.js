@@ -263,6 +263,56 @@ module.exports = {
       assert.eq(back.on, false);
     });
 
+    /* One page at a time is a way of looking at the sheet, not a different
+       sheet: ink the facing page reaches over with is still printed here, so
+       it is still shown here. It just is not this page's to edit, and there is
+       no facing page on screen to drag anything onto. */
+    t.check('one page at a time still shows what the facing page reaches over with', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        setActive(1);                       // spread 2|3: panel 1 left, panel 2 right
+        doc().panels[2].els.push({ id: 'over', type: 'text', x: -40, y: 40, w: 120,
+          rot: 0, text: 'reaching back', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4,
+          span: true });
+        setSingleView(true);
+        const gn = guestNodes.get('over');
+        const box = gn.getBoundingClientRect();
+        ${TAP}(gn, box.left + 4, box.top + 4);
+        return {
+          visible: visiblePanels().slice(),
+          painted: !!gn, onPanel: +gn.parentNode.dataset.pi,
+          ownHalf: !!nodes.get('over'), selected: selId
+        };
+      })()`);
+      assert.deepEq(r.visible, [1], 'only the one page is on screen');
+      assert.eq(r.painted, true, 'the ink that lands on this page is still drawn');
+      assert.eq(r.onPanel, 1, 'in this panel, where it prints');
+      assert.eq(r.ownHalf, false, 'the page that owns it is not rendered at all');
+      assert.eq(r.selected, null, 'and tapping it selects nothing, since its page is not here');
+    });
+
+    t.check('with one page on screen, nothing can be dragged onto the page you cannot see', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        setActive(1);
+        setSingleView(true);
+        doc().panels[1].els.push({ id: 'stuck', type: 'text', x: 20, y: 40, w: 90,
+          rot: 0, text: 'stays put', font: 0, size: 12, color: '#111', align: 'left',
+          lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        paintAll();
+        const node = nodes.get('stuck'), box = node.getBoundingClientRect();
+        ${TOUCH_DRAG}(node, box.left + 5, box.top + 5, box.left + 4000, box.top + 5);
+        const g = geom();
+        return { x: doc().panels[1].els[0] && Math.round(doc().panels[1].els[0].x),
+                 maxX: Math.round(g.panelW - 20),
+                 here: doc().panels[1].els.length, facing: doc().panels[2].els.length };
+      })()`);
+      assert.eq(r.here, 1, 'it stays on the page being shown');
+      assert.eq(r.facing, 0, 'and never lands on the one that is not');
+      assert.ok(r.x <= r.maxX, 'it is held inside the single page, got x ' + r.x);
+    });
+
     t.check('a wide screen always shows the spread, even with single view left on', async () => {
       await page.unemulate();
       await page.reset({ singleView: true });

@@ -166,6 +166,15 @@ margin** — an earlier version did, and it broke folding, because folds land on
 middle of the *paper*, not the middle of the artwork. The margin is a rim of the
 sheet that gets clipped, not a scale factor.
 
+One fact falls out of `IMPOSE` and is load-bearing for everything in "Across the
+fold" below: **every spread is two adjacent cells in the same row, at the same
+rotation, with the left-hand page on the reading-left side** — `back|cover` at row 1
+cols 2→3, `2|3` at row 0 cols 3→2, `4|5` at row 0 cols 1→0, `6|7` at row 1 cols
+0→1. The two halves of a spread are therefore physically continuous on the paper,
+the only cut (the slit) is horizontal so it never crosses a gutter, and
+`unsafeEdges()` only ever puts the rim on a spread's *outer* edges, never the fold.
+A test derives this from `IMPOSE` rather than trusting it.
+
 ### Rendering
 
 `paintAll()` = `paintPage()` + `paintStrip()` + `buildInspector()`. `paintPage()`
@@ -185,6 +194,76 @@ Two invariants worth knowing before touching it:
 - Selection may live in either half of a spread, so look elements up with
   `findSel()` / `elById()` rather than assuming `state.active`. Mutating actions use
   `selPanel()`, not `panel()`.
+
+### Across the fold
+
+An element with `span` set runs over the gutter onto the facing page. It is still
+owned by exactly one panel and still carries that panel's local coordinates; what
+changes is that it gets **painted twice** — once on its own page and once in the
+facing panel offset by one panel width, which is what the adjacency fact above
+makes possible. Each panel goes on clipping itself, so nothing leaks onto a page
+that is not facing, and the two clipped halves meet exactly on the fold.
+
+- `spanPartner(pi)` — the facing panel and the `dx` to draw this panel's elements at
+  over there: `-panelW` for a left-hand page, `+panelW` for a right-hand one.
+- `guestsFor(pi)` / `paintList(pi)` — what paints on a panel, back to front: its own
+  elements with the facing page's spanning ones spliced in **at the layer index they
+  hold over there**, so a spanning element keeps its layer number on both pages and
+  `layer()` needs no special case. All three painters go through `paintList()` —
+  `paintPage()`, `paintStrip()` and `buildSheetNode()` — which is the whole of what
+  export had to learn.
+- `nodes` is the element's own interactive node; `guestNodes` is the copy in the
+  facing panel, carrying its offset in `dataset.dx`. **Restyle through `restyle(el)`,
+  not `styleNode()`**, or the two halves drift apart mid-drag. Typing is the one
+  thing `restyle()` cannot cover: `paintPage()` will not rebuild under a live caret,
+  so `startEdit()`'s `oninput` copies the text across by hand.
+
+The fold is not a wall for *any* element, spanning or not:
+
+- `clampPos()` keeps an element inside `spreadRange(pi)` — the whole spread — rather
+  than inside the one panel, and `rehome()` hands it to the facing page when its
+  **centre** crosses, shifting `x` by one panel width so coordinates stay panel-local
+  and the handles stay on the half you can grab. That is also the editor's only
+  "move this to the other page" gesture.
+- An element that is not spanning would vanish into the gutter mid-drag, so for the
+  length of the gesture `crossingId` lends it the same second copy a spanning one
+  keeps. Lending it repaints the sheet, which is why **the move drag takes its deltas
+  straight off the pointer** rather than through `pageXY()` — the node the gesture
+  started on is gone by then. Rotate and resize still use `pageXY()`; they do not
+  cross panels.
+- A template marked `spread` measures x and w across both pages (0 is the left-hand
+  page's left edge, 2 the right-hand page's right edge) and everything it places
+  spans; on a right-hand page `applyTemplate()` shifts the whole thing back by a
+  panel. Heights and text sizes stay panel-relative so type does not double.
+
+Two things measured rather than assumed, both in `print.test.js`:
+
+- A block straddling the fold rasters as **one** unbroken run of ink, full width,
+  centred on the crease — checked for both rotations and for an element owned by
+  either half, because each has its own sign.
+- The join keeps one lighter pixel on the fold, and **this is known, measured and
+  deliberately left alone**. The two clipped halves do not quite cover the device
+  pixel they share, so whatever is under them shows through: about 48 of 255 through
+  black ink at 300 dpi, one pixel wide (0.085 mm), and it survives the PDF's JPEG at
+  quality 0.94. It is the panel model's, not the span's — two plain adjacent panels
+  of the same colour leave 27 the same way with nothing crossing them, which is what
+  the control in that test measures.
+
+  Before trying to fix it, know what has already been ruled out. It is a real
+  geometric residue, not sequential-compositing loss, so nothing that only reorders
+  or recolours the layers touches it — only ink drawn across that pixel *without* a
+  clip fills it. Laying the element down a third time underneath, across the whole
+  spread, and moving the two panels' backgrounds onto that bed so they stop painting
+  paper into the residue, does work: 48 → 0, measured. It was still not kept, because
+  making those panels transparent is what lets the bed show through, and it then
+  shows through *everywhere*, not just in the residue — so anything translucent or
+  soft-edged renders doubled (an `opacity: 0.5` element composites to 0.75, and a
+  scaled image's soft edge reads about 0.6 pt wider). Trading a hairline for wrong
+  opacity is a bad trade. Do not chase it by rounding panel geometry either — a
+  panel is exactly a quarter of the sheet. The honest fix is to stop clipping per
+  panel: one spread-wide box with a `clip-path` per element, so a spanning element
+  simply has no clip and nothing is ever drawn twice. That is a rewrite of the
+  rendering model, not a patch.
 
 ### Small screens
 
@@ -275,6 +354,12 @@ comfortable fit it reads back exactly `clientWidth` no matter how much smaller
 the row actually got, and the loop can never tell it has already succeeded.
 Measure to the last child's own right edge instead, which has no such floor.
 
+With one page on screen, the facing page's spanning ink is **still painted** — it
+prints on this page, so it is shown on this page — but it is not this page's to edit:
+`elById()` cannot see it, so a tap on it falls through to a blank-paper click, and
+`spreadRange()` / `rehome()` both fall back to the single panel, so nothing can be
+dragged onto a page that is not on screen.
+
 On a phone, `#viewToggle` and `setSingleView()` let `state.singleView` show just
 `state.active` instead of its spread — `visiblePanels()` is the only other place
 that reads the flag, and only under `narrow()`, so a wide screen ignores it even
@@ -333,6 +418,11 @@ Binary container, format version 2, written by `saveZine()` and read by `readZin
 ```
 "ZINE" │ u8 version │ u8 flags │ u32 meta length │ u32 image count │ meta │ images…
 ```
+
+`span` rides inside `docs` and needs nothing of its own here, but it is stored as a
+flag that is either present or absent — `fixDoc()` coerces and **never writes a
+stored `false`** — so files written before it existed stay byte for byte what they
+were.
 
 Metadata is UTF-8 JSON deflated with `CompressionStream` (flag bit 0; falls back to
 raw if the API is missing). Images follow as length-prefixed **original bytes**, not

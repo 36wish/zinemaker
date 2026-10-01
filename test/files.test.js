@@ -14,7 +14,7 @@ const BUILD_AND_SAVE = `(async () => {
   panel().els.push({ id: 'i1', type: 'image', x: 4, y: 4, w: 60, h: 60, rot: 0,
     src: px, fit: 'cover', filter: 'copy', opacity: 1, radius: 0 });
   panel().els.push({ id: 'i2', type: 'image', x: 9, y: 9, w: 60, h: 60, rot: 12,
-    src: px, fit: 'cover', filter: 'none', opacity: 0.5, radius: 3 });
+    src: px, fit: 'cover', filter: 'none', opacity: 0.5, radius: 3, span: true });
   setActive(7); addQr();
   setActive(0); addText(); stopEdit();
   selected().text = 'cover words';
@@ -100,6 +100,7 @@ module.exports = {
           rehydrated: imgs.every(e => /^data:image\\/png;base64,/.test(e.src)),
           shared: imgs.length === 2 && imgs[0].src === imgs[1].src,
           keptFilter: (imgs[0] || {}).filter,
+          span: imgs.map(e => String(e.span)).join(','),
           qr: !!state.docs.mini.panels[7].els.find(e => e.type === 'qr')
         };
       })()`);
@@ -110,7 +111,26 @@ module.exports = {
       assert.eq(r.rehydrated, true, 'images come back as data URLs');
       assert.eq(r.shared, true, 'a shared image is handed back to both elements');
       assert.eq(r.keptFilter, 'copy', 'per-element settings survive');
+      assert.eq(r.span, 'undefined,true', 'an element that runs across the fold comes back doing it');
       assert.eq(r.qr, true);
+    });
+
+    /* Spanning is stored as a flag that is either there or absent — never a
+       stored false — so that files written before it existed stay byte for
+       byte what they were, and anything odd in a hand-edited one is coerced
+       rather than believed. */
+    t.check('the spanning flag is normalised on the way in', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        const d = fixDoc({ panels: [{ els: [
+          { id: 'a', type: 'text', span: true },
+          { id: 'b', type: 'text', span: false },
+          { id: 'c', type: 'text', span: 'yes' },
+          { id: 'd', type: 'text' }
+        ] }] }, 8);
+        return d.panels[0].els.map(e => e.id + ':' + ('span' in e ? e.span : 'absent')).join(' ');
+      })()`);
+      assert.eq(r, 'a:true b:absent c:true d:absent');
     });
 
     t.check('a plain-JSON .zine from format version 1 still opens', async () => {

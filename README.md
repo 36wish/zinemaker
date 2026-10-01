@@ -30,6 +30,10 @@ since every asset path is relative and nothing is fetched from the network.
   handle above to rotate.
 - Pick a layout template from the sidebar to pour existing content into a
   new arrangement.
+- Drag anything over the fold and it moves to the page it lands on.
+- Select a photo or a line of text and press **Both pages** to run it across
+  the fold, printing straight through the crease onto the facing page. The
+  two wide layout templates fill a whole spread the same way.
 - Undo/redo with Ctrl/Cmd+Z (Shift to redo), or the toolbar buttons.
 - Drop a `.zine` file anywhere on the page to open it.
 

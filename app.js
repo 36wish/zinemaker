@@ -101,7 +101,11 @@ function unsafeEdges(pi) {
 }
 
 let selId = null, editingId = null, curZoom = 1;
-const nodes = new Map();
+/* An element mid-drag across the fold is lent a second copy for the length of
+   the gesture, the same one a spanning element keeps, so that it visibly
+   crosses instead of vanishing into the gutter and reappearing. */
+let crossingId = null;
+const nodes = new Map(), guestNodes = new Map();
 let hist = [], future = [];
 
 const doc = () => state.docs.mini;
@@ -200,7 +204,11 @@ function fixDoc(d, n) {
     out.panels[i].bg = src[i].bg || '#ffffff';
     out.panels[i].els = (Array.isArray(src[i].els) ? src[i].els : [])
       .filter(e => e && (e.type === 'text' || e.type === 'image' || e.type === 'qr'))
-      .map(e => Object.assign({}, e, { id: e.id || uid() }));
+      .map(e => {
+        const c = Object.assign({}, e, { id: e.id || uid() });
+        if (c.span) c.span = true; else delete c.span;   // never store the false
+        return c;
+      });
   }
   return out;
 }
@@ -485,7 +493,13 @@ function layer(dir) {
 
 /* Slot geometry is in fractions of the panel, so one table serves both the
    panels of any paper size. Text sizes are fractions of
-   the panel width for the same reason. */
+   the panel width for the same reason.
+
+   A template marked `spread` measures x and w across both facing pages
+   instead — 0 is the left-hand page's left edge and 2 is the right-hand
+   page's right edge — and everything it places spans the fold. Heights and
+   text sizes stay panel-relative, so type does not double when a layout goes
+   wide. */
 const TEMPLATES = [
   { n: 'Cover', slots: [
     { t: 'image', x: 0, y: 0, w: 1, h: .58 },
@@ -544,6 +558,13 @@ const TEMPLATES = [
     { t: 'text', x: .5, y: .8, w: .45, size: .05, font: 5, align: 'center', rot: 4,
       bg: '#ffffff', text: 'cut + paste' }
   ] },
+  { n: 'Across the fold', spread: true, slots: [
+    { t: 'image', x: 0, y: 0, w: 2, h: 1 }
+  ] },
+  { n: 'Wide photo', spread: true, slots: [
+    { t: 'image', x: .06, y: .08, w: 1.88, h: .66 },
+    { t: 'text', x: .14, y: .8, w: 1.72, size: .045, font: 2, align: 'center', text: 'caption' }
+  ] },
   { n: 'Back + QR', slots: [
     { t: 'text', x: .1, y: .12, w: .8, size: .055, font: 4, align: 'center', text: 'THANKS' },
     { t: 'qr', x: .3, y: .34, w: .4 },
@@ -579,6 +600,11 @@ function applyTemplate(tpl) {
   const pool = { text: [], image: [], qr: [] };
   p.els.forEach(e => { if (pool[e.type]) pool[e.type].push(e); });
 
+  /* A spread layout is laid out from the left-hand page's left edge, so on a
+     right-hand page the whole thing shifts back by a panel to land there. */
+  const originX = tpl.spread && SPREADS.find(p => p.indexOf(state.active) >= 0)[1] === state.active
+    ? -g.panelW : 0;
+
   const placed = [], used = {};
   tpl.slots.forEach(s => {
     let el = pool[s.t].shift();
@@ -587,10 +613,11 @@ function applyTemplate(tpl) {
       el = slotDefault(s);
     }
     used[el.id] = 1;
-    el.x = Math.round(s.x * g.panelW);
+    el.x = Math.round(s.x * g.panelW + originX);
     el.y = Math.round(s.y * g.panelH);
     el.w = Math.round(s.w * g.panelW);
     el.rot = s.rot || 0;
+    if (tpl.spread) el.span = true; else delete el.span;
     if (s.t === 'image') el.h = Math.round(s.h * g.panelH);
     if (s.t === 'qr') el.h = el.w;
     if (s.t === 'text') {
@@ -674,9 +701,11 @@ function paintQr(node, el) {
   node.replaceChild(svg, old);
 }
 
-function styleNode(node, el) {
+/* dx offsets this copy of the element: zero on its own page, one panel width
+   for the continuation painted in the facing panel (see spanPartner). */
+function styleNode(node, el, dx) {
   const s = node.style;
-  s.left = el.x + 'px';
+  s.left = (el.x + (dx || 0)) + 'px';
   s.top = el.y + 'px';
   s.width = el.w + 'px';
   s.height = el.type === 'text' ? 'auto' : el.h + 'px';
@@ -705,7 +734,7 @@ function styleNode(node, el) {
   }
 }
 
-function makeNode(el, interactive) {
+function makeNode(el, interactive, dx) {
   const d = document.createElement('div');
   d.className = 'el el-' + el.type;
   d.dataset.id = el.id;
@@ -732,7 +761,7 @@ function makeNode(el, interactive) {
                    (el.type === 'text' ? '' : '<div class="h se"></div>');
     d.appendChild(ui);
   }
-  styleNode(d, el);
+  styleNode(d, el, dx);
   return d;
 }
 
@@ -753,18 +782,61 @@ function chopBands(pi) {
   return wrap.firstChild ? wrap : null;
 }
 
+/* Facing pages are adjacent cells in the same row of the sheet, at the same
+   rotation and in reading order (see IMPOSE and the check in print.test.js),
+   so the two halves of a spread are physically continuous on the paper. That
+   is what makes spanning cheap: an element with span set stays owned by one
+   panel, in that panel's own coordinates, and is simply painted a second time
+   in the facing panel shifted by one panel width. Each panel goes on clipping
+   itself, so nothing leaks onto a page that is not facing, and the two clipped
+   halves meet exactly at the fold.
+
+   Returns the facing panel and the offset to draw this panel's elements at
+   when they are painted over there. */
+function spanPartner(pi) {
+  const s = SPREADS.find(p => p.indexOf(pi) >= 0);
+  if (!s) return null;
+  return { pi: s[0] === pi ? s[1] : s[0], dx: (s[0] === pi ? -1 : 1) * geom().panelW };
+}
+
+/* What the facing page lends this one, with the layer index it holds over
+   there — a spanning element keeps its layer number on both pages. */
+function guestsFor(pi) {
+  const p = spanPartner(pi);
+  if (!p) return [];
+  const dx = -p.dx;                       // that page's origin, seen from here
+  return doc().panels[p.pi].els
+    .map((el, i) => ({ el: el, i: i, dx: dx }))
+    .filter(x => x.el.span || x.el.id === crossingId);
+}
+
+/* Everything that paints on a panel, back to front: its own elements, with
+   the facing page's spanning ones spliced in at that same layer index. */
+function paintList(pi) {
+  const out = doc().panels[pi].els.map(el => ({ el: el, dx: 0 }));
+  guestsFor(pi).forEach(g => out.splice(Math.min(g.i, out.length), 0, { el: g.el, dx: g.dx }));
+  return out;
+}
+
+/* Both copies of an element move together — the one on its own page and the
+   continuation across the gutter. */
+function restyle(el) {
+  const n = nodes.get(el.id);
+  if (n) styleNode(n, el, 0);
+  const gn = guestNodes.get(el.id);
+  if (gn) styleNode(gn, el, +gn.dataset.dx);
+}
+
 function paintPage() {
   const sheet = $('#sheet'), g = geom(), list = visiblePanels();
   sheet.style.width = g.panelW * list.length + 'px';
   sheet.style.height = g.panelH + 'px';
 
   if (editingId) {                       // never rebuild under a live caret
-    list.forEach(pi => doc().panels[pi].els.forEach(el => {
-      const n = nodes.get(el.id);
-      if (n) styleNode(n, el);
-    }));
+    list.forEach(pi => paintList(pi).forEach(it => restyle(it.el)));
   } else {
     nodes.clear();
+    guestNodes.clear();
     sheet.textContent = '';
     list.forEach(pi => {
       const p = doc().panels[pi];
@@ -774,9 +846,16 @@ function paintPage() {
       pd.style.width = g.panelW + 'px';
       pd.style.height = g.panelH + 'px';
       pd.style.background = p.bg;
-      p.els.forEach(el => {
-        const n = makeNode(el, true);
-        nodes.set(el.id, n);
+      paintList(pi).forEach(it => {
+        const own = !it.dx;
+        const n = makeNode(it.el, own, it.dx);
+        if (own) {
+          nodes.set(it.el.id, n);
+        } else {
+          n.classList.add('guest');
+          n.dataset.dx = it.dx;
+          guestNodes.set(it.el.id, n);
+        }
         pd.appendChild(n);
       });
       const chop = chopBands(pi);
@@ -784,7 +863,7 @@ function paintPage() {
       sheet.appendChild(pd);
     });
   }
-  nodes.forEach((n, id) => n.classList.toggle('sel', id === selId));
+  markSelected();
   $('#spine').classList.toggle('on', list.length === 2);
   paintLabels(list);
   fitZoom();
@@ -860,7 +939,7 @@ function paintStrip() {
     mini.className = 'panel';
     mini.style.cssText = 'width:' + g.panelW + 'px;height:' + g.panelH + 'px;' +
                          'background:' + p.bg + ';transform:scale(' + tz + ')';
-    p.els.forEach(el => mini.appendChild(makeNode(el, false)));
+    paintList(i).forEach(it => mini.appendChild(makeNode(it.el, false, it.dx)));
     tp.appendChild(mini);
     const lbl = document.createElement('span');
     lbl.className = 'tl';
@@ -884,11 +963,16 @@ function paintAll() { paintPage(); paintStrip(); buildInspector(); }
 
 /* ------------------------------------------------------------- interaction */
 
+function markSelected() {
+  nodes.forEach((n, k) => n.classList.toggle('sel', k === selId));
+  guestNodes.forEach((n, k) => n.classList.toggle('sel', k === selId));
+}
+
 function select(id) {
   if (selId === id) return;
   if (editingId && editingId !== id) stopEdit();
   selId = id;
-  nodes.forEach((n, k) => n.classList.toggle('sel', k === id));
+  markSelected();
   buildInspector();
 }
 
@@ -917,6 +1001,10 @@ function startEdit(id, selectAll) {
   sel.removeAllRanges(); sel.addRange(range);
   body.oninput = () => {
     el.text = body.innerText.replace(/\u00a0/g, ' ');
+    // paintPage() will not rebuild under the caret, so the copy across the
+    // gutter has to be told by hand.
+    const gn = guestNodes.get(id);
+    if (gn) gn.querySelector('.body').textContent = el.text;
     paintStripSoon(); save();
   };
 }
@@ -946,13 +1034,47 @@ function pageXY(ev, node) {
 const wrapDeg = d => Math.round(((d % 360) + 540) % 360 - 180);
 
 /* Elements may bleed off the edge — that is half the point of a zine — but
-   never so far that there is nothing left on the panel to grab. */
+   never so far that there is nothing left to grab. What they are kept inside
+   is the spread, not the one panel: the fold is not a wall, and an element
+   dragged over it belongs to the page it lands on. A phone showing one page
+   at a time is the exception, since there is no facing page on screen to drag
+   onto. Panel-local x, so the facing half sits above panelW for a left-hand
+   page and below zero for a right-hand one. */
 const KEEP = 20;
-function clampPos(el, node) {
+function spreadRange(pi) {
+  const g = geom();
+  const p = (narrow() && state.singleView) ? null : spanPartner(pi);
+  const lo = p ? Math.min(0, -p.dx) : 0;      // that page's origin, seen from here
+  return { lo: lo, hi: lo + (p ? 2 : 1) * g.panelW };
+}
+
+function clampPos(el, node, pi) {
   const g = geom();
   const h = el.type === 'text' ? (node ? node.offsetHeight : 0) : el.h;
-  el.x = Math.min(g.panelW - KEEP, Math.max(KEEP - el.w, el.x));
+  const f = pi == null ? findSel() : null;
+  const r = spreadRange(pi == null ? (f ? f.pi : state.active) : pi);
+  el.x = Math.min(r.hi - KEEP, Math.max(r.lo + KEEP - el.w, el.x));
   el.y = Math.min(g.panelH - KEEP, Math.max(KEEP - h, el.y));
+}
+
+/* Ownership follows the element's centre over the fold, so the handles are
+   always on the half you can actually grab and the coordinates stay
+   panel-local. It lands on top of its new page, where a new element would. */
+function rehome() {
+  const f = findSel();
+  if (!f || (narrow() && state.singleView)) return false;
+  const p = spanPartner(f.pi);
+  if (!p) return false;
+  const el = f.el, g = geom();
+  const gutter = p.dx < 0 ? g.panelW : 0;     // the fold, in this panel's own x
+  const cx = el.x + el.w / 2;
+  if (p.dx < 0 ? cx <= gutter : cx >= gutter) return false;
+  const from = doc().panels[f.pi];
+  from.els = from.els.filter(e => e.id !== el.id);
+  doc().panels[p.pi].els.push(el);
+  el.x += p.dx;
+  state.active = p.pi;
+  return true;
 }
 
 function rotVec(dx, dy, deg) {
@@ -973,7 +1095,7 @@ function anchorFix(el, dw, dh) {
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
 let dragging = false;
-function drag(ev, onMove) {
+function drag(ev, onMove, onEnd) {
   const snap = JSON.stringify(state.docs);
   let moved = false;
   dragging = true;
@@ -999,7 +1121,10 @@ function drag(ev, onMove) {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
-    if (moved) { paintStripSoon(); syncInspector(); save(); }
+    if (moved) {
+      if (onEnd) onEnd();
+      paintStripSoon(); syncInspector(); save();
+    }
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -1027,6 +1152,9 @@ function onPagePointerDown(ev) {
   const pi = pd ? +pd.dataset.pi : state.active;
   if (!hit) { setActive(pi); stopEdit(); select(null); return; }
   const id = hit.dataset.id;
+  // The facing page's half of a spanning element, on a phone showing one page
+  // at a time: it prints here, but it is not this page's to edit.
+  if (!elById(id)) { setActive(pi); stopEdit(); select(null); return; }
   if (editingId === id && !handle) return;       // let the caret do its job
   ev.preventDefault();
   setActive(pi);                                 // both may rebuild every node
@@ -1049,7 +1177,7 @@ function onPagePointerDown(ev) {
       let a = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI + 90;
       if (e.shiftKey) a = Math.round(a / 15) * 15;
       el.rot = wrapDeg(a);
-      styleNode(node, el);
+      restyle(el);
     });
     return;
   }
@@ -1072,21 +1200,27 @@ function onPagePointerDown(ev) {
       anchorFix(el, w - el.w, dh);
       el.w = w;
       if (el.type === 'image') el.h = h;
-      styleNode(node, el);
+      restyle(el);
     });
     return;
   }
 
-  const start = pageXY(ev, node), x0 = el.x, y0 = el.y;
+  /* Deltas come straight off the pointer instead of through the element's own
+     panel, because crossing the fold repaints the sheet mid-drag and the node
+     this gesture started on is gone by then. */
+  const x0 = el.x, y0 = el.y, cx0 = ev.clientX, cy0 = ev.clientY;
+  let lent = false;
   drag(ev, e => {
-    const p = pageXY(e, node);
-    let dx = p.x - start.x, dy = p.y - start.y;
+    let dx = (e.clientX - cx0) / curZoom, dy = (e.clientY - cy0) / curZoom;
     if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+    if (!lent && !el.span) { lent = true; crossingId = el.id; paintPage(); }
     el.x = Math.round(x0 + dx);
     el.y = Math.round(y0 + dy);
-    clampPos(el, node);
-    node.style.left = el.x + 'px';
-    node.style.top = el.y + 'px';
+    clampPos(el, nodes.get(el.id));
+    restyle(el);
+  }, () => {
+    crossingId = null;
+    if (rehome()) { buildInspector(); paintPage(); } else paintPage();
   });
 }
 
@@ -1118,7 +1252,7 @@ function onKey(e) {
     pushHistory();
     el.x += nudge[0]; el.y += nudge[1];
     clampPos(el, nodes.get(el.id));
-    styleNode(nodes.get(el.id), el);
+    if (rehome()) { buildInspector(); paintPage(); } else restyle(el);
     paintStripSoon(); syncInspector(); save();
   }
 }
@@ -1195,6 +1329,9 @@ function inspectorForEl(el, withHeading = true) {
       '<div class="col"><label class="f">Y</label><input class="num grow" type="number" data-k="y" data-num value="' + el.y + '"></div>' +
       '<div class="col"><label class="f">W</label><input class="num grow" type="number" data-k="w" data-num value="' + el.w + '"></div>' +
     '</div></div>' +
+    '<div class="grp"><label class="f">Across the fold</label><div class="seg" style="margin-bottom:8px">' +
+      '<button data-span="0"' + on(!el.span) + '>One page</button>' +
+      '<button data-span="1"' + on(!!el.span) + '>Both pages</button></div></div>' +
     '<div class="grp"><label class="f">Arrange</label><div class="seg" style="margin-bottom:8px">' +
       '<button data-layer="back">Back</button><button data-layer="-1">&minus;</button>' +
       '<button data-layer="1">+</button><button data-layer="front">Front</button></div>' +
@@ -1277,10 +1414,10 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 /* Little diagram of a template's slots, drawn from the same numbers that
    position the real elements. */
 function templateThumb(tpl) {
-  const W = 44, H = 62;
+  const P = 44, H = 62, W = tpl.spread ? P * 2 : P;
   let r = '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fff"/>';
   tpl.slots.forEach(s => {
-    const x = s.x * W, y = s.y * H, w = s.w * W;
+    const x = s.x * P, y = s.y * H, w = s.w * P;
     const rot = s.rot ? ' transform="rotate(' + s.rot + ' ' + (x + w / 2) + ' ' + (y + 4) + ')"' : '';
     if (s.t === 'image') {
       r += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + (s.h * H) +
@@ -1298,6 +1435,10 @@ function templateThumb(tpl) {
       }
     }
   });
+  if (tpl.spread) {
+    r += '<line x1="' + P + '" y1="0" x2="' + P + '" y2="' + H +
+         '" stroke="#fff" stroke-width="1" stroke-dasharray="2 2"/>';
+  }
   return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + r + '</svg>';
 }
 
@@ -1381,10 +1522,23 @@ function helpHtml() {
       '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
       'to 15&deg;. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes.</p>' +
 
+    '<h3>Across the fold</h3>' +
+    '<p>Pick a photo or a line of text and press <b>Both pages</b> to run it ' +
+      'over the fold. It still belongs to one page &mdash; that is where its ' +
+      'handles are &mdash; but it prints straight through the crease onto the ' +
+      'facing one, because the two pages of a spread sit side by side on the ' +
+      'sheet. Drag anything over the fold and it moves to the page it lands on.</p>' +
+    '<p>The fold itself takes a little: expect a hair of the picture to ' +
+      'disappear into the crease, and how squarely the halves line up depends on ' +
+      'how squarely you fold. Faces and words land badly in the middle &mdash; ' +
+      'give the fold sky, or a gap between words. A QR code across the fold will ' +
+      'usually not scan at all.</p>' +
+
     '<h3>Layouts</h3>' +
     '<p>A layout pours what is already on the page into its slots &mdash; photos ' +
       'and text in the order you added them. Anything left over stays where it ' +
-      'was, and an empty photo slot is left empty.</p>' +
+      'was, and an empty photo slot is left empty. The two wide layouts fill the ' +
+      'whole spread rather than the one page.</p>' +
 
     '<h3>QR codes</h3>' +
     '<p>Keep a QR code at least 20 mm wide with a pale background behind it, and ' +
@@ -1729,6 +1883,17 @@ function wireInspector(side) {
     node.addEventListener('blur', () => { node._h = 0; });
   });
 
+  /* Spanning is the one property that changes what the fold does to an
+     element, so it repaints both halves rather than just restyling. */
+  side.querySelectorAll('[data-span]').forEach(b => b.addEventListener('click', () => {
+    const el = selected(); if (!el) return;
+    const v = b.getAttribute('data-span') === '1';
+    if (!!el.span === v) return;
+    pushHistory();
+    if (v) el.span = true; else delete el.span;
+    paintAll(); save();
+  }));
+
   side.querySelectorAll('[data-layer]').forEach(b => b.addEventListener('click', () => {
     const v = b.dataset.layer;
     layer(v === 'front' || v === 'back' ? v : parseInt(v, 10));
@@ -1869,7 +2034,7 @@ function buildSheetNode() {
     pn.style.cssText = 'position:absolute;left:' + (g.offsetX + c.col * g.panelW) + 'px;top:' +
       (g.offsetY + c.row * g.panelH) + 'px;width:' + g.panelW + 'px;height:' + g.panelH +
       'px;background:' + p.bg + ';transform:rotate(' + c.rot + 'deg)';
-    p.els.forEach(el => pn.appendChild(makeNode(el, false)));
+    paintList(c.i).forEach(it => pn.appendChild(makeNode(it.el, false, it.dx)));
     block.appendChild(pn);
   });
 
