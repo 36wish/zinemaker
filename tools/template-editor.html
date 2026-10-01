@@ -1,0 +1,692 @@
+<!doctype html>
+<!--
+  Template editor — a dev tool, not part of the shipped app.
+
+  It is not linked from index.html and is never loaded by Zine Maker itself;
+  it exists to make hand-authoring entries in app.js's TEMPLATES array
+  easier than guessing fractions. Lay slots out visually, tweak their
+  numbers in the form, then copy the generated object into TEMPLATES.
+
+  Self-contained on purpose (no dependency, no bundler), matching the rest
+  of the repo, even though this file doesn't share its file:// constraint.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Template editor — Zine Maker (dev tool)</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.4 -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background: #f1f2f6; color: #1c1e26;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 10px 16px; background: #22232c; color: #fff;
+  }
+  header h1 { font-size: 15px; margin: 0 16px 0 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  header label { font-size: 12px; color: #c7c9d6; display: flex; align-items: center; gap: 6px; }
+  select, input, button, textarea {
+    font: inherit; border-radius: 6px; border: 1px solid #ccc; padding: 5px 8px;
+  }
+  header select, header button { background: #34364a; border-color: #46485f; color: #fff; }
+  button { cursor: pointer; background: #fff; }
+  button.primary { background: #3d6bff; border-color: #3d6bff; color: #fff; }
+  button.danger { color: #c0392b; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  main.wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
+
+  .canvas-col { display: flex; flex-direction: column; gap: 10px; }
+  .stage-frame {
+    background:
+      linear-gradient(45deg, #e3e4ec 25%, transparent 25%),
+      linear-gradient(-45deg, #e3e4ec 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #e3e4ec 75%),
+      linear-gradient(-45deg, transparent 75%, #e3e4ec 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+    padding: 1px; border-radius: 4px;
+  }
+  #stage {
+    position: relative; background: #fff; overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .slot {
+    position: absolute; cursor: move; outline: 1px dashed rgba(0,0,0,.25);
+    overflow: hidden; user-select: none;
+  }
+  .slot.image { background: repeating-linear-gradient(45deg, #c9cbd6, #c9cbd6 6px, #b9bbc8 6px, #b9bbc8 12px); }
+  .slot.qr { background: #3c3f52; }
+  .slot.qr::after {
+    content: ''; position: absolute; inset: 12%; background:
+      repeating-conic-gradient(#fff 0 25%, transparent 0 50%) 0 0/40% 40%;
+  }
+  .slot.text { padding: 2px; white-space: pre-wrap; word-break: break-word; }
+  .slot.selected { outline: 2px solid #3d6bff; z-index: 5; }
+  .handle {
+    position: absolute; background: #3d6bff; border: 1px solid #fff;
+    width: 10px; height: 10px; border-radius: 2px; z-index: 6;
+  }
+  .handle.corner { right: -5px; bottom: -5px; cursor: nwse-resize; }
+  .handle.edge { right: -5px; top: 50%; margin-top: -5px; cursor: ew-resize; }
+
+  .slotlist { width: 300px; background: #fff; border-radius: 8px; padding: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .slotlist h2, .form-col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #666; margin: 4px 6px 8px; }
+  .slotlist .add-row { display: flex; gap: 6px; padding: 0 6px 8px; }
+  .slotlist .add-row button { flex: 1; font-size: 12px; }
+  .slotrow {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  }
+  .slotrow:hover { background: #f4f5fa; }
+  .slotrow.selected { background: #e8edff; }
+  .slotrow .tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 5px;
+    border-radius: 4px; background: #dfe1ec; color: #444;
+  }
+  .slotrow .label { flex: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slotrow .mini-btns { display: flex; gap: 2px; }
+  .slotrow .mini-btns button { padding: 2px 6px; font-size: 11px; border: none; background: none; color: #667; }
+  .slotrow .mini-btns button:hover { color: #000; }
+
+  .form-col { width: 300px; background: #fff; border-radius: 8px; padding: 8px 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 11px; color: #667; margin-bottom: 3px; }
+  .field input[type=number], .field input[type=text], .field select { width: 100%; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .seg { display: flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; border: none; border-radius: 0; border-right: 1px solid #ccc; background: #fff; font-size: 12px; padding: 6px 0; }
+  .seg button:last-child { border-right: none; }
+  .seg button.on { background: #3d6bff; color: #fff; }
+  .checkline { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+  .empty-note { color: #778; font-size: 12.5px; padding: 20px 6px; text-align: center; }
+  .name-field { margin-bottom: 12px; }
+  .name-field input { width: 100%; font-size: 15px; font-weight: 600; padding: 7px 9px; }
+
+  section.output { margin: 0 16px 24px; }
+  section.output .head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  section.output h2 { font-size: 13px; margin: 0; }
+  pre#outCode {
+    background: #1c1e26; color: #d3e0ff; padding: 14px 16px; border-radius: 8px;
+    overflow: auto; font: 12.5px/1.5 "SF Mono", Consolas, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  .import-box { display: none; margin: 0 16px 20px; background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .import-box.open { display: block; }
+  .import-box textarea { width: 100%; height: 80px; font: 12px/1.4 monospace; }
+  .import-box .row { display: flex; gap: 8px; margin-top: 8px; }
+  .hint { color: #889; font-size: 11.5px; margin: -4px 0 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Template editor <span style="font-weight:400;color:#9698ab">— dev tool</span></h1>
+  <label>Paper
+    <select id="paperSel"><option value="a4">A4</option><option value="letter">US Letter</option></select>
+  </label>
+  <label>Load
+    <select id="loadSel"></select>
+  </label>
+  <button id="importBtn">Paste template…</button>
+  <div class="spacer"></div>
+  <button id="newBtn">New template</button>
+</header>
+
+<div class="import-box" id="importBox">
+  <div>Paste one <code>{ n: '...', slots: [...] }</code> object, or a whole
+    <code>TEMPLATES</code>-shaped array, copied from <code>app.js</code>.</div>
+  <textarea id="importText" placeholder="{ n: 'Cover', slots: [ { t: 'image', x: 0, y: 0, w: 1, h: .58 }, ... ] }"></textarea>
+  <div class="row">
+    <button class="primary" id="importGo">Load</button>
+    <button id="importCancel">Cancel</button>
+    <div class="spacer"></div>
+    <span id="importMsg" class="hint" style="margin:0"></span>
+  </div>
+</div>
+
+<main class="wrap">
+  <div class="canvas-col">
+    <div class="stage-frame"><div id="stage"></div></div>
+    <div class="hint" style="margin:0 2px">Drag a slot to move it, drag its blue
+      handle to resize. Order in the list below is the pour order: the first
+      image slot gets the panel's first photo, and so on.</div>
+    <div class="slotlist">
+      <h2>Slots</h2>
+      <div class="add-row">
+        <button data-add="image">+ Image</button>
+        <button data-add="text">+ Text</button>
+        <button data-add="qr">+ QR</button>
+      </div>
+      <div id="slotRows"></div>
+    </div>
+  </div>
+
+  <div class="form-col">
+    <div class="name-field">
+      <label style="font-size:11px;color:#667;font-weight:400">Template name</label>
+      <input id="tplName" type="text" value="Untitled">
+    </div>
+    <div id="propForm"><div class="empty-note">Select a slot to edit it, or add one on the left.</div></div>
+  </div>
+</main>
+
+<section class="output">
+  <div class="head">
+    <h2>Paste into TEMPLATES in app.js</h2>
+    <button id="copyBtn">Copy</button>
+    <span id="copyMsg" class="hint" style="margin:0"></span>
+  </div>
+  <pre id="outCode"></pre>
+</section>
+
+<script>
+'use strict';
+
+/* ---- mirrors of the bits of app.js this tool needs -------------------- */
+const PT = 72 / 25.4;
+const PAPER = { a4: { w: 210, h: 297 }, letter: { w: 215.9, h: 279.4 } };
+const FONTS = [
+  { n: 'Sans', c: '"Helvetica Neue",Arial,sans-serif' },
+  { n: 'Serif', c: 'Georgia,"Times New Roman",serif' },
+  { n: 'Typewriter', c: '"Courier New",Courier,monospace' },
+  { n: 'Impact', c: 'Impact,Haettenschweiler,"Arial Black",sans-serif' },
+  { n: 'Heavy', c: '"Arial Black",Gadget,sans-serif' },
+  { n: 'Comic', c: '"Comic Sans MS","Chalkboard SE",cursive' },
+  { n: 'Script', c: '"Brush Script MT","Segoe Script",cursive' },
+  { n: 'Condensed', c: '"Arial Narrow","Liberation Sans Narrow",sans-serif' }
+];
+
+/* Snapshot of app.js's TEMPLATES, for a starting point. Not read live —
+   re-paste from app.js if it has since changed. */
+const STARTERS = [
+  { n: 'Cover', slots: [
+    { t: 'image', x: 0, y: 0, w: 1, h: .58 },
+    { t: 'text', x: .08, y: .63, w: .84, size: .13, lh: .98, font: 3, align: 'left', text: 'TITLE' },
+    { t: 'text', x: .08, y: .88, w: .84, size: .042, font: 2, align: 'left', text: 'issue one' }
+  ] },
+  { n: 'Poster cover', slots: [
+    { t: 'image', x: .08, y: .02, w: .85, h: .86 },
+    { t: 'text', x: .11, y: .33, w: .8, size: .21, lh: .95, font: 1, align: 'left',
+      rot: -9, color: '#ffffff', text: 'TITLE' }
+  ] },
+  { n: 'Full bleed', slots: [
+    { t: 'image', x: 0, y: 0, w: 1, h: 1 },
+    { t: 'text', x: .06, y: .84, w: .88, size: .045, font: 0, align: 'left', bg: '#ffffff', text: 'caption' }
+  ] },
+  { n: 'Framed photo', slots: [
+    { t: 'image', x: .08, y: .06, w: .84, h: .79 }
+  ] },
+  { n: 'Photo, text', slots: [
+    { t: 'image', x: .08, y: .08, w: .84, h: .42 },
+    { t: 'text', x: .08, y: .55, w: .84, size: .075, font: 4, align: 'left', text: 'HEADING' },
+    { t: 'text', x: .08, y: .68, w: .84, size: .042, lh: 1.45, font: 0, align: 'left', text: 'body copy' }
+  ] },
+  { n: 'Text, photo', slots: [
+    { t: 'text', x: .08, y: .07, w: .84, size: .075, font: 4, align: 'left', text: 'HEADING' },
+    { t: 'text', x: .08, y: .2, w: .84, size: .042, lh: 1.45, font: 0, align: 'left', text: 'body copy' },
+    { t: 'image', x: .08, y: .52, w: .84, h: .4 }
+  ] },
+  { n: 'Stacked', slots: [
+    { t: 'image', x: .08, y: .07, w: .84, h: .35 },
+    { t: 'image', x: .08, y: .45, w: .84, h: .35 },
+    { t: 'text', x: .08, y: .84, w: .84, size: .04, font: 2, align: 'center', text: 'caption' }
+  ] },
+  { n: 'Four up', slots: [
+    { t: 'image', x: .07, y: .08, w: .41, h: .34 },
+    { t: 'image', x: .52, y: .08, w: .41, h: .34 },
+    { t: 'image', x: .07, y: .46, w: .41, h: .34 },
+    { t: 'image', x: .52, y: .46, w: .41, h: .34 },
+    { t: 'text', x: .07, y: .84, w: .86, size: .038, font: 2, align: 'center', text: 'caption' }
+  ] },
+  { n: 'Quote', slots: [
+    { t: 'text', x: .1, y: .3, w: .8, size: .095, lh: 1.15, font: 1, align: 'center', italic: true, text: 'a line worth\nsetting large' },
+    { t: 'text', x: .1, y: .72, w: .8, size: .038, font: 2, align: 'center', text: '— source' }
+  ] },
+  { n: 'Columns', slots: [
+    { t: 'text', x: .07, y: .07, w: .86, size: .07, font: 4, align: 'left', text: 'HEADING' },
+    { t: 'text', x: .07, y: .22, w: .41, size: .034, lh: 1.5, font: 0, align: 'left', text: 'left column' },
+    { t: 'text', x: .52, y: .22, w: .41, size: .034, lh: 1.5, font: 0, align: 'left', text: 'right column' }
+  ] },
+  { n: 'Collage', slots: [
+    { t: 'image', x: .04, y: .1, w: .52, h: .34, rot: -6 },
+    { t: 'image', x: .42, y: .3, w: .5, h: .32, rot: 5 },
+    { t: 'image', x: .1, y: .55, w: .54, h: .33, rot: -3 },
+    { t: 'text', x: .5, y: .8, w: .45, size: .05, font: 5, align: 'center', rot: 4, bg: '#ffffff', text: 'cut + paste' }
+  ] },
+  { n: 'Back + QR', slots: [
+    { t: 'text', x: .1, y: .12, w: .8, size: .055, font: 4, align: 'center', text: 'THANKS' },
+    { t: 'qr', x: .3, y: .34, w: .4 },
+    { t: 'text', x: .1, y: .76, w: .8, size: .034, lh: 1.4, font: 2, align: 'center', text: 'made on a photocopier' }
+  ] },
+  { n: 'Back, photo + QR', slots: [
+    { t: 'image', x: .04, y: .02, w: .94, h: .88 },
+    { t: 'qr', x: .06, y: .77, w: .16 },
+    { t: 'text', x: .13, y: .9, w: .76, size: .06, font: 7, align: 'center', lh: 1.35, text: 'caption' }
+  ] }
+];
+
+/* ---- editor state ------------------------------------------------------ */
+let uidN = 1;
+const uid = () => 's' + (uidN++);
+
+function freshSlot(t) {
+  if (t === 'image') return { id: uid(), t: 'image', x: .1, y: .1, w: .8, h: .4, rot: 0 };
+  if (t === 'qr') return { id: uid(), t: 'qr', x: .3, y: .3, w: .4, rot: 0 };
+  return { id: uid(), t: 'text', x: .1, y: .1, w: .8, size: .05, lh: 1.35, font: 0,
+           align: 'left', italic: false, rot: 0, color: '', bg: '', text: 'text' };
+}
+
+let state = {
+  name: 'Untitled',
+  paper: 'a4',
+  slots: [freshSlot('image'), freshSlot('text')],
+  selectedId: null
+};
+state.slots[1].y = .55; state.slots[1].size = .08; state.slots[1].text = 'HEADING';
+
+const pastedTemplates = [];
+
+/* ---- geometry ----------------------------------------------------------- */
+function panelPt(paperKey) {
+  const p = PAPER[paperKey];
+  const sw = p.h * PT, sh = p.w * PT;
+  return { w: sw / 4, h: sh / 2 };
+}
+
+/* ---- DOM refs ------------------------------------------------------------ */
+const $ = s => document.querySelector(s);
+const stage = $('#stage');
+const slotRows = $('#slotRows');
+const propForm = $('#propForm');
+const outCode = $('#outCode');
+const tplName = $('#tplName');
+const paperSel = $('#paperSel');
+const loadSel = $('#loadSel');
+
+function selectedSlot() { return state.slots.find(s => s.id === state.selectedId) || null; }
+
+/* ---- number formatting to match the terse style already in app.js ------- */
+function fmtNum(n) {
+  const r = Math.round(n * 1000) / 1000;
+  let s = String(r);
+  if (s.startsWith('0.')) s = s.slice(1);
+  else if (s.startsWith('-0.')) s = '-' + s.slice(2);
+  return s;
+}
+
+/* ---- rendering the stage -------------------------------------------------- */
+const STAGE_W = 320;
+function layoutStage() {
+  const pt = panelPt(state.paper);
+  const h = Math.round(STAGE_W * pt.h / pt.w);
+  stage.style.width = STAGE_W + 'px';
+  stage.style.height = h + 'px';
+}
+
+function paintStage() {
+  layoutStage();
+  const W = STAGE_W, H = stage.clientHeight;
+  stage.innerHTML = '';
+  state.slots.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'slot ' + s.t + (s.id === state.selectedId ? ' selected' : '');
+    el.style.left = (s.x * W) + 'px';
+    el.style.top = (s.y * H) + 'px';
+    el.style.width = (s.w * W) + 'px';
+    if (s.t === 'image') el.style.height = (s.h * H) + 'px';
+    if (s.t === 'qr') el.style.height = (s.w * W) + 'px';
+    if (s.rot) el.style.transform = 'rotate(' + s.rot + 'deg)';
+    if (s.t === 'text') {
+      el.style.fontFamily = FONTS[s.font || 0].c;
+      el.style.fontSize = Math.max(6, s.size * W) + 'px';
+      el.style.lineHeight = (s.lh || 1.35);
+      el.style.textAlign = s.align || 'left';
+      el.style.fontStyle = s.italic ? 'italic' : 'normal';
+      el.style.color = s.color || '#111111';
+      if (s.bg) el.style.background = s.bg;
+      el.textContent = s.text || 'text';
+    }
+    el.addEventListener('pointerdown', ev => startDrag(ev, s, 'move'));
+    el.addEventListener('click', ev => { ev.stopPropagation(); select(s.id); });
+
+    if (s.t === 'text') {
+      const h2 = document.createElement('div');
+      h2.className = 'handle edge';
+      h2.addEventListener('pointerdown', ev => startDrag(ev, s, 'resize-w'));
+      el.appendChild(h2);
+    } else {
+      const h2 = document.createElement('div');
+      h2.className = 'handle corner';
+      h2.addEventListener('pointerdown', ev => startDrag(ev, s, s.t === 'qr' ? 'resize-square' : 'resize'));
+      el.appendChild(h2);
+    }
+    stage.appendChild(el);
+  });
+}
+
+stage.addEventListener('click', () => select(null));
+
+function startDrag(ev, slot, mode) {
+  ev.preventDefault(); ev.stopPropagation();
+  select(slot.id);
+  const W = STAGE_W, H = stage.clientHeight;
+  const startX = ev.clientX, startY = ev.clientY;
+  const orig = Object.assign({}, slot);
+  function move(e) {
+    const dx = (e.clientX - startX) / W, dy = (e.clientY - startY) / H;
+    if (mode === 'move') {
+      slot.x = clamp(orig.x + dx, -0.3, 1.05);
+      slot.y = clamp(orig.y + dy, -0.3, 1.05);
+    } else if (mode === 'resize') {
+      slot.w = clamp(orig.w + dx, .03, 1.5);
+      if (slot.t === 'image') slot.h = clamp(orig.h + dy, .03, 1.5);
+    } else if (mode === 'resize-square') {
+      slot.w = clamp(orig.w + dx, .03, 1.2);
+    } else if (mode === 'resize-w') {
+      slot.w = clamp(orig.w + dx, .03, 1.5);
+    }
+    paintStage();
+    renderForm();
+  }
+  function up() {
+    slot.x = round3(slot.x); slot.y = round3(slot.y);
+    if (slot.w != null) slot.w = round3(slot.w);
+    if (slot.h != null) slot.h = round3(slot.h);
+    paintStage(); renderForm(); renderOutput();
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  }
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const round3 = v => Math.round(v * 1000) / 1000;
+
+/* ---- slot list sidebar ---------------------------------------------------- */
+function paintSlotList() {
+  slotRows.innerHTML = '';
+  if (!state.slots.length) {
+    slotRows.innerHTML = '<div class="empty-note">No slots yet — add one above.</div>';
+    return;
+  }
+  state.slots.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'slotrow' + (s.id === state.selectedId ? ' selected' : '');
+    const label = s.t === 'text' ? (s.text || 'text') : s.t === 'image' ? 'photo' : 'QR code';
+    row.innerHTML =
+      '<span class="tag">' + s.t + '</span>' +
+      '<span class="label">' + (i + 1) + '. ' + escapeHtml(label) + '</span>' +
+      '<span class="mini-btns">' +
+        '<button data-act="up" title="Move earlier in pour order">&uarr;</button>' +
+        '<button data-act="down" title="Move later in pour order">&darr;</button>' +
+        '<button data-act="dup" title="Duplicate">Dup</button>' +
+        '<button data-act="del" title="Delete">&times;</button>' +
+      '</span>';
+    row.addEventListener('click', () => select(s.id));
+    row.querySelector('[data-act=up]').addEventListener('click', e => { e.stopPropagation(); moveSlot(i, -1); });
+    row.querySelector('[data-act=down]').addEventListener('click', e => { e.stopPropagation(); moveSlot(i, 1); });
+    row.querySelector('[data-act=dup]').addEventListener('click', e => { e.stopPropagation(); dupSlot(s); });
+    row.querySelector('[data-act=del]').addEventListener('click', e => { e.stopPropagation(); delSlot(s); });
+    slotRows.appendChild(row);
+  });
+}
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function moveSlot(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= state.slots.length) return;
+  const [s] = state.slots.splice(i, 1);
+  state.slots.splice(j, 0, s);
+  renderAll();
+}
+function dupSlot(s) {
+  const copy = Object.assign({}, s, { id: uid() });
+  state.slots.splice(state.slots.indexOf(s) + 1, 0, copy);
+  select(copy.id);
+}
+function delSlot(s) {
+  state.slots = state.slots.filter(x => x !== s);
+  if (state.selectedId === s.id) state.selectedId = null;
+  renderAll();
+}
+
+document.querySelectorAll('[data-add]').forEach(b => {
+  b.addEventListener('click', () => {
+    const s = freshSlot(b.dataset.add);
+    state.slots.push(s);
+    select(s.id);
+  });
+});
+
+function select(id) {
+  state.selectedId = id;
+  renderAll();
+}
+
+/* ---- property form ---------------------------------------------------- */
+function numField(labelText, value, onInput, opts) {
+  opts = opts || {};
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  const label = document.createElement('label');
+  label.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.step = opts.step || 0.01;
+  if (opts.min != null) input.min = opts.min;
+  if (opts.max != null) input.max = opts.max;
+  input.value = value;
+  input.addEventListener('input', () => {
+    const v = parseFloat(input.value);
+    if (!isNaN(v)) { onInput(v); paintStage(); paintSlotList(); renderOutput(); }
+  });
+  wrap.appendChild(label); wrap.appendChild(input);
+  return wrap;
+}
+
+function renderForm() {
+  const s = selectedSlot();
+  propForm.innerHTML = '';
+  if (!s) {
+    propForm.innerHTML = '<div class="empty-note">Select a slot to edit it, or add one on the left.</div>';
+    return;
+  }
+
+  const row2a = document.createElement('div'); row2a.className = 'row2';
+  row2a.appendChild(numField('X', s.x, v => s.x = v));
+  row2a.appendChild(numField('Y', s.y, v => s.y = v));
+  propForm.appendChild(row2a);
+
+  const row2b = document.createElement('div'); row2b.className = 'row2';
+  row2b.appendChild(numField('Width', s.w, v => s.w = v));
+  if (s.t === 'image') row2b.appendChild(numField('Height', s.h, v => s.h = v));
+  else if (s.t === 'qr') {
+    const wrap = document.createElement('div'); wrap.className = 'field';
+    wrap.innerHTML = '<label>Height</label><input type="text" disabled value="= width (square)">';
+    row2b.appendChild(wrap);
+  } else {
+    row2b.appendChild(numField('Rotation °', s.rot || 0, v => s.rot = v, { step: 1 }));
+  }
+  propForm.appendChild(row2b);
+
+  if (s.t !== 'text') {
+    const rowr = document.createElement('div'); rowr.className = 'row2';
+    rowr.appendChild(numField('Rotation °', s.rot || 0, v => s.rot = v, { step: 1 }));
+    propForm.appendChild(rowr);
+  }
+
+  if (s.t === 'text') {
+    const row3 = document.createElement('div'); row3.className = 'row2';
+    row3.appendChild(numField('Size (× panel width)', s.size, v => s.size = v, { step: .005 }));
+    row3.appendChild(numField('Line height', s.lh || 1.35, v => s.lh = v, { step: .05 }));
+    propForm.appendChild(row3);
+
+    const fontField = document.createElement('div'); fontField.className = 'field';
+    fontField.innerHTML = '<label>Font</label>';
+    const fontSel = document.createElement('select');
+    FONTS.forEach((f, i) => fontSel.innerHTML += '<option value="' + i + '"' + (s.font === i ? ' selected' : '') + '>' + f.n + '</option>');
+    fontSel.addEventListener('change', () => { s.font = +fontSel.value; paintStage(); renderOutput(); });
+    fontField.appendChild(fontSel);
+    propForm.appendChild(fontField);
+
+    const alignField = document.createElement('div'); alignField.className = 'field';
+    alignField.innerHTML = '<label>Align</label>';
+    const seg = document.createElement('div'); seg.className = 'seg';
+    ['left', 'center', 'right'].forEach(a => {
+      const b = document.createElement('button');
+      b.textContent = a[0].toUpperCase();
+      b.className = s.align === a ? 'on' : '';
+      b.addEventListener('click', () => { s.align = a; renderForm(); paintStage(); renderOutput(); });
+      seg.appendChild(b);
+    });
+    alignField.appendChild(seg);
+    propForm.appendChild(alignField);
+
+    const italicField = document.createElement('div'); italicField.className = 'field checkline';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!s.italic;
+    cb.addEventListener('change', () => { s.italic = cb.checked; paintStage(); renderOutput(); });
+    italicField.appendChild(cb);
+    italicField.appendChild(document.createTextNode('Italic'));
+    propForm.appendChild(italicField);
+
+    const colorField = document.createElement('div'); colorField.className = 'field row2';
+    colorField.innerHTML =
+      '<div><label>Text colour</label><input type="color" id="colorPick" value="' + (s.color || '#111111') + '"></div>' +
+      '<div><label>Background</label>' +
+        '<span class="checkline"><input type="checkbox" id="bgOn" ' + (s.bg ? 'checked' : '') + '>' +
+        '<input type="color" id="bgPick" value="' + (s.bg || '#ffffff') + '" ' + (s.bg ? '' : 'disabled') + '></span></div>';
+    propForm.appendChild(colorField);
+    colorField.querySelector('#colorPick').addEventListener('input', e => { s.color = e.target.value; paintStage(); renderOutput(); });
+    const bgOn = colorField.querySelector('#bgOn'), bgPick = colorField.querySelector('#bgPick');
+    bgOn.addEventListener('change', () => { bgPick.disabled = !bgOn.checked; s.bg = bgOn.checked ? bgPick.value : ''; paintStage(); renderOutput(); });
+    bgPick.addEventListener('input', () => { s.bg = bgPick.value; paintStage(); renderOutput(); });
+
+    const textField = document.createElement('div'); textField.className = 'field';
+    textField.innerHTML = '<label>Placeholder text (used when there is nothing to pour in)</label>';
+    const ta = document.createElement('textarea');
+    ta.style.width = '100%'; ta.rows = 2; ta.value = s.text || '';
+    ta.addEventListener('input', () => { s.text = ta.value; paintStage(); paintSlotList(); renderOutput(); });
+    textField.appendChild(ta);
+    propForm.appendChild(textField);
+  }
+
+  const actions = document.createElement('div'); actions.className = 'row2'; actions.style.marginTop = '14px';
+  const dupBtn = document.createElement('button'); dupBtn.textContent = 'Duplicate'; dupBtn.addEventListener('click', () => dupSlot(s));
+  const delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.className = 'danger'; delBtn.addEventListener('click', () => delSlot(s));
+  actions.appendChild(dupBtn); actions.appendChild(delBtn);
+  propForm.appendChild(actions);
+}
+
+/* ---- code generation ---------------------------------------------------- */
+function jsStringLiteral(str) {
+  const esc = String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+  return "'" + esc + "'";
+}
+
+function slotToCode(s) {
+  const parts = ['t: \'' + s.t + '\''];
+  parts.push('x: ' + fmtNum(s.x));
+  parts.push('y: ' + fmtNum(s.y));
+  parts.push('w: ' + fmtNum(s.w));
+  if (s.t === 'image') parts.push('h: ' + fmtNum(s.h));
+  if (s.t === 'text') {
+    parts.push('size: ' + fmtNum(s.size));
+    if (s.lh && Math.abs(s.lh - 1.35) > 1e-6) parts.push('lh: ' + fmtNum(s.lh));
+    parts.push('font: ' + (s.font || 0));
+    parts.push('align: \'' + (s.align || 'left') + '\'');
+    if (s.italic) parts.push('italic: true');
+  }
+  if (s.rot) parts.push('rot: ' + fmtNum(s.rot));
+  if (s.t === 'text') {
+    if (s.color && s.color.toLowerCase() !== '#111111') parts.push('color: \'' + s.color + '\'');
+    if (s.bg) parts.push('bg: \'' + s.bg + '\'');
+    parts.push('text: ' + jsStringLiteral(s.text || 'text'));
+  }
+  return '{ ' + parts.join(', ') + ' }';
+}
+
+function renderOutput() {
+  const name = tplName.value.trim() || 'Untitled';
+  const lines = state.slots.map(s => '    ' + slotToCode(s));
+  outCode.textContent = '{ n: ' + jsStringLiteral(name) + ', slots: [\n' + lines.join(',\n') + '\n  ] },';
+}
+
+/* ---- load / import ------------------------------------------------------- */
+function loadTemplate(tpl) {
+  state.name = tpl.n;
+  state.slots = tpl.slots.map(s => Object.assign({ id: uid() }, s));
+  state.selectedId = null;
+  tplName.value = tpl.n;
+  renderAll();
+}
+
+function fillLoadSelect() {
+  loadSel.innerHTML = '<option value="" disabled selected>Load a starter…</option>';
+  STARTERS.forEach((t, i) => loadSel.innerHTML += '<option value="s' + i + '">' + escapeHtml(t.n) + '</option>');
+  pastedTemplates.forEach((t, i) => loadSel.innerHTML += '<option value="p' + i + '">(pasted) ' + escapeHtml(t.n) + '</option>');
+}
+loadSel.addEventListener('change', () => {
+  const v = loadSel.value;
+  if (v[0] === 's') loadTemplate(STARTERS[+v.slice(1)]);
+  else if (v[0] === 'p') loadTemplate(pastedTemplates[+v.slice(1)]);
+});
+
+$('#newBtn').addEventListener('click', () => {
+  state = { name: 'Untitled', paper: state.paper, slots: [], selectedId: null };
+  tplName.value = 'Untitled';
+  renderAll();
+});
+
+$('#importBtn').addEventListener('click', () => $('#importBox').classList.add('open'));
+$('#importCancel').addEventListener('click', () => $('#importBox').classList.remove('open'));
+$('#importGo').addEventListener('click', () => {
+  const msg = $('#importMsg');
+  try {
+    const val = new Function('"use strict"; return (' + $('#importText').value + ');')();
+    const list = Array.isArray(val) ? val.filter(v => v && v.slots) : (val && val.slots ? [val] : []);
+    if (!list.length) throw new Error('no template found');
+    list.forEach(t => pastedTemplates.push(t));
+    fillLoadSelect();
+    loadTemplate(list[0]);
+    $('#importBox').classList.remove('open');
+    msg.textContent = '';
+  } catch (err) {
+    msg.textContent = 'Could not parse that: ' + err.message;
+  }
+});
+
+paperSel.addEventListener('change', () => { state.paper = paperSel.value; renderAll(); });
+tplName.addEventListener('input', renderOutput);
+
+$('#copyBtn').addEventListener('click', async () => {
+  const text = outCode.textContent;
+  const msg = $('#copyMsg');
+  try {
+    await navigator.clipboard.writeText(text);
+    msg.textContent = 'Copied.';
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); msg.textContent = 'Copied.'; }
+    catch (e) { msg.textContent = 'Copy failed — select the text manually.'; }
+    document.body.removeChild(ta);
+  }
+  setTimeout(() => { msg.textContent = ''; }, 2000);
+});
+
+/* ---- boot ----------------------------------------------------------------- */
+function renderAll() {
+  paintStage();
+  paintSlotList();
+  renderForm();
+  renderOutput();
+}
+fillLoadSelect();
+renderAll();
+</script>
+</body>
+</html>

@@ -195,23 +195,44 @@ column and becomes a sheet that slides up over the stage, toggled by `#panelBtn`
 phone** — it is the only place most controls exist, which is what the earlier
 breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
 
-**On a phone, `#panelBtn` and its sheet (`#side`) mean the whole project, never a
-selected element.** `buildInspector()` only puts `inspectorForEl(el)` into
-`#inspector` when `!narrow()`; on a phone `#inspector` is always
-`inspectorForPage()`, whatever is selected. A selected element gets a second,
-independent sheet instead — `#elemDrawer` — that `syncElemDrawer()` shows and hides
-as `selected()` comes and goes, closed (`.elem-peek` only, not `.open`) the moment
-it appears rather than sprung open; tapping `#elemPeek` is the only thing that
-changes `elemDrawerOpen`. Both sheets share the bottom edge, so `body.side-open
-.elem-drawer` pushes the element drawer off screen while `#side` is open rather
-than letting them stack — the two are equivalent bottom-sheet CSS (`transform:
-translateY`, sliding up), just `#elemDrawer`'s closed position leaves its
-`.elem-peek` bar on screen instead of going fully off it. `wireInspector()` takes
-the container to wire as a parameter now, since `#inspector` and `#elemInspector`
-both need it and never share markup (`data-k` and its siblings only ever appear in
-`inspectorForEl`'s output); `syncInspector()` (used mid-drag, so it must not
-rebuild anything) picks between them the same way. On a wide screen `#elemDrawer`
-stays `hidden` and the one sidebar column behaves exactly as it always did.
+**`#panelBtn` means the whole project, full stop — never a page or a selected
+element — and that now holds at every width, not just on a phone.**
+`inspectorForPage()` is gone; the old "This page" + "Whole project" markup is
+split into `pageSectionHtml()` and `projectSectionHtml()`, and nothing ever
+concatenates them back together. `buildInspector()` puts `projectSectionHtml()`
+into `#inspector` whenever `narrow() || sideOpen`, `inspectorForEl(el)` when
+neither and something is selected, and `pageSectionHtml()` when neither and
+nothing is. `sideOpen` therefore means two different things depending on
+width — on a phone it is `#side`'s open/shut sheet state, and on a wide
+screen there is no sheet to open, so it is simply the settings button's own
+toggle for which of the three the one sidebar column is showing — but it is
+the one flag both read, so `setSide()` calls `buildInspector()` on every
+flip and a wide screen's column swaps in place instead of sliding.
+
+On a phone, "This page" and a selection each also get their own independent
+bottom sheet, on top of that column, since there is no room to show either
+beside the stage at all: `#elemDrawer`, shown by `syncElemDrawer()` whenever
+something is selected, and `#pageDrawer`, its mirror image, shown by
+`syncPageDrawer()` whenever nothing is — mutually exclusive by construction,
+since one needs `selected()` and the other needs `!selected()`, so they never
+contend for the same tab. Both start closed (`.elem-peek` only, not `.open`)
+the moment they appear rather than sprung open, and tapping their own peek
+bar (`#elemPeek` / `#pagePeek`) is the only thing that opens either
+(`elemDrawerOpen` / `pageDrawerOpen`). `#pageDrawer` reuses `#elemDrawer`'s CSS
+wholesale by sharing its `.elem-drawer` class — `.page-drawer` is just a JS
+hook, not a separate stylesheet rule. All three sheets share the bottom edge,
+so `body.side-open .elem-drawer` pushes both drawers off screen while `#side`
+is open rather than letting them stack — the two are equivalent bottom-sheet
+CSS (`transform: translateY`, sliding up), just their closed position leaves
+their own peek bar on screen instead of going fully off it. `wireInspector()`
+takes the container to wire as a parameter now, since `#inspector`,
+`#elemInspector` and `#pageInspector` all need it and never share markup
+(`data-k` and its siblings only ever appear in `inspectorForEl`'s output);
+`syncInspector()` (used mid-drag, so it must not rebuild anything) only ever
+targets `#inspector` or `#elemInspector`, since it bails out immediately when
+nothing is selected and `#pageDrawer` only ever shows when nothing is. On a
+wide screen `#elemDrawer` and `#pageDrawer` stay `hidden`, since the one
+sidebar column already covers what they are for.
 
 The title, paper size and the open/save buttons live in the toolbar on a wide
 screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
@@ -277,7 +298,14 @@ Touch is not just a narrower mouse:
 
 `fitZoom()` measures the strip, the labels and the stage padding rather than
 assuming a desktop window, and `paintStrip()` calls it once the thumbnails exist,
-since their height is part of the sheet's budget.
+since their height is part of the sheet's budget. `#sheetLabels` (the page-name
+row above the sheet) is hidden outright on a phone — the thumbnail strip below
+already does the same job of switching pages, and dropping the row hands its
+space back to the sheet — so `fitZoom()` treats its height as 0 there rather
+than falling back to a desktop guess. The stage's own bottom padding on a
+phone reserves room for whichever of `#elemDrawer` / `#pageDrawer` is peeking
+(always one of them, since they are mutually exclusive — see "Small screens"
+above), so the thumbnail strip scales to fit above it instead of under it.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.

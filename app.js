@@ -492,10 +492,18 @@ const TEMPLATES = [
     { t: 'text', x: .08, y: .63, w: .84, size: .13, lh: .98, font: 3, align: 'left', text: 'TITLE' },
     { t: 'text', x: .08, y: .88, w: .84, size: .042, font: 2, align: 'left', text: 'issue one' }
   ] },
+  { n: 'Poster cover', slots: [
+    { t: 'image', x: .08, y: .02, w: .85, h: .86 },
+    { t: 'text', x: .11, y: .33, w: .8, size: .21, lh: .95, font: 1, align: 'left',
+      rot: -9, color: '#ffffff', text: 'TITLE' }
+  ] },
   { n: 'Full bleed', slots: [
     { t: 'image', x: 0, y: 0, w: 1, h: 1 },
     { t: 'text', x: .06, y: .84, w: .88, size: .045, font: 0, align: 'left',
       bg: '#ffffff', text: 'caption' }
+  ] },
+  { n: 'Framed photo', slots: [
+    { t: 'image', x: .08, y: .06, w: .84, h: .79 }
   ] },
   { n: 'Photo, text', slots: [
     { t: 'image', x: .08, y: .08, w: .84, h: .42 },
@@ -541,6 +549,12 @@ const TEMPLATES = [
     { t: 'qr', x: .3, y: .34, w: .4 },
     { t: 'text', x: .1, y: .76, w: .8, size: .034, lh: 1.4, font: 2, align: 'center',
       text: 'made on a photocopier' }
+  ] },
+  { n: 'Back, photo + QR', slots: [
+    { t: 'image', x: .04, y: .02, w: .94, h: .88 },
+    { t: 'qr', x: .06, y: .77, w: .16 },
+    { t: 'text', x: .13, y: .9, w: .76, size: .06, font: 7, align: 'center', lh: 1.35,
+      text: 'caption' }
   ] }
 ];
 
@@ -551,7 +565,7 @@ function slotDefault(s) {
              light: '#ffffff', quiet: 4, opacity: 1 };
   }
   return { id: uid(), type: 'text', x: 0, y: 0, w: 10, rot: 0,
-           text: s.text || 'text', font: 0, size: 12, color: '#111111',
+           text: s.text || 'text', font: 0, size: 12, color: s.color || '#111111',
            align: 'left', lh: 1.35, ls: 0, bold: false, italic: false,
            bg: '', pad: 4 };
 }
@@ -584,6 +598,7 @@ function applyTemplate(tpl) {
       if (s.align) el.align = s.align;
       if (s.font != null) el.font = s.font;
       if (s.lh) el.lh = s.lh;
+      if (s.color) el.color = s.color;
       el.italic = !!s.italic;
       el.bg = s.bg || '';
     }
@@ -775,7 +790,10 @@ function paintPage() {
   fitZoom();
 }
 
-/* Page names above the sheet; the highlighted one receives new elements. */
+/* Page names above the sheet; the highlighted one receives new elements.
+   Clicking a label is a switch-page gesture, not a selection one — even the
+   highlighted label's own click deselects, which setActive() alone would
+   miss when it is already the active page. */
 function paintLabels(list) {
   const row = $('#sheetLabels');
   row.textContent = '';
@@ -786,7 +804,7 @@ function paintLabels(list) {
     s.appendChild(pill);
     s.title = 'Panel ' + (pi + 1);
     if (pi === state.active) s.className = 'on';
-    s.addEventListener('click', () => setActive(pi));
+    s.addEventListener('click', () => { setActive(pi); select(null); });
     row.appendChild(s);
   });
 }
@@ -810,7 +828,9 @@ function fitZoom() {
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const stripH = $('#strip').offsetHeight || 96;
-  const labelH = $('#sheetLabels').offsetHeight || 22;
+  // Hidden outright on a phone (see #sheetLabels in the narrow query), where
+  // its offsetHeight is always genuinely 0, not just unmeasured yet.
+  const labelH = narrow() ? 0 : ($('#sheetLabels').offsetHeight || 22);
   const availW = stage.clientWidth - padX - 4;
   const availH = stage.clientHeight - padY - stripH - labelH - 10;
   const z = Math.max(0.15, Math.min(availW / (g.panelW * cols), availH / g.panelH, 2.6));
@@ -1085,6 +1105,7 @@ function onKey(e) {
   if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
   if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
   if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
+  if (e.key === 'Escape' && pageDrawerOpen) { setPageDrawer(false); return; }
   if (e.key === 'Escape') { select(null); return; }
   const el = selected();
   if (!el) return;
@@ -1103,14 +1124,6 @@ function onKey(e) {
 }
 
 /* ---------------------------------------------------------------- inspector */
-
-function opts(list, cur, val, name) {
-  return list.map((o, i) => {
-    const v = val ? o[val] : i;
-    return '<option value="' + v + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' +
-           (name ? o[name] : o) + '</option>';
-  }).join('');
-}
 
 function foldDiagram() {
   const cw = 60, ch = 42, x0 = 4, y0 = 12;
@@ -1154,20 +1167,24 @@ function foldDiagram() {
     '</text></svg>';
 }
 
-/* On a phone the settings button means the whole project, full stop, so the
-   sheet it opens never switches to a selected element's own controls — see
-   syncElemDrawer() for where those go instead. On a wide screen there is no
-   such button and no elem-drawer; the one sidebar column still shows
-   whichever is relevant, as it always has. */
+/* The settings button means the whole project, full stop, on any width —
+   "This page" (panel colour, layout, clear panel) only ever shows when
+   nothing is selected, and a selection always gets its own view. A phone
+   gets there with two extra tabs (see syncPageDrawer() / syncElemDrawer());
+   a wide screen has only the one sidebar column, so sideOpen — the settings
+   button's own toggle, not just a phone sheet's open/shut state — decides
+   which of the three that column is showing. setSide() rebuilds whenever it
+   flips, so pressing the button swaps the column in place. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
-  side.innerHTML = (!narrow() && el) ? inspectorForEl(el) : inspectorForPage();
+  side.innerHTML = (narrow() || sideOpen) ? projectSectionHtml() : (el ? inspectorForEl(el) : pageSectionHtml());
   wireInspector(side);
   syncElemDrawer();
+  syncPageDrawer();
   paintHelp();
 }
 
-function inspectorForEl(el) {
+function inspectorForEl(el, withHeading = true) {
   const common =
     '<div class="grp"><div class="row">' +
       '<div class="col"><label class="f">Rotate</label>' +
@@ -1184,10 +1201,15 @@ function inspectorForEl(el) {
     '<div class="row"><button class="grow" data-act="dup">Duplicate</button>' +
       '<button class="grow" data-act="del">Delete</button></div></div>';
 
+  // withHeading is false for the element drawer's own content: its peek bar
+  // already names the type (Text/QR code/Image), word for word.
   if (el.type === 'text') {
-    return '<h2>Text</h2>' +
+    return (withHeading ? '<h2>Text</h2>' : '') +
       '<div class="grp"><div class="row">' +
-        '<select class="grow" data-k="font" data-num>' + opts(FONTS, el.font, null, 'n') + '</select>' +
+        '<select class="grow" data-k="font" data-num>' +
+          FONTS.map((f, i) => '<option value="' + i + '"' + (i === el.font ? ' selected' : '') +
+            ' style="font-family:' + esc(f.c) + '">' + esc(f.n) + '</option>').join('') +
+        '</select>' +
       '</div><div class="row">' +
         '<div class="col"><label class="f">Size</label><input class="num grow" type="number" min="4" max="200" data-k="size" data-num value="' + el.size + '"></div>' +
         '<div class="col"><label class="f">Line</label><input class="num grow" type="number" step="0.05" data-k="lh" data-num value="' + el.lh + '"></div>' +
@@ -1207,7 +1229,7 @@ function inspectorForEl(el) {
 
   if (el.type === 'qr') {
     const q = qrFor(el.text || '', el.ecl || 'M');
-    return '<h2>QR code</h2>' +
+    return (withHeading ? '<h2>QR code</h2>' : '') +
       '<div class="grp"><div class="row">' +
         '<div class="col"><label class="f">Links to</label>' +
         '<input class="grow" type="text" data-k="text" value="' + esc(el.text || '') + '"></div>' +
@@ -1229,10 +1251,14 @@ function inspectorForEl(el) {
       '</div></div>' + common;
   }
 
-  return '<h2>Image</h2>' +
+  return (withHeading ? '<h2>Image</h2>' : '') +
+    '<div class="grp"><label class="f">Effect</label><div class="filter-grid">' +
+      FILTERS.map(f => '<button class="swatch' + ((el.filter || 'none') === f.v ? ' on' : '') +
+        '" data-k="filter" data-v="' + f.v + '" title="' + esc(f.n) + '">' +
+        '<img class="' + (f.v === 'none' ? '' : 'f-' + f.v) + '" src="' + esc(el.src || '') + '">' +
+        '<span>' + esc(f.n) + '</span></button>').join('') +
+    '</div></div>' +
     '<div class="grp"><div class="row">' +
-      '<div class="col"><label class="f">Effect</label><select class="grow" data-k="filter">' + opts(FILTERS, el.filter, 'v', 'n') + '</select></div>' +
-    '</div><div class="row">' +
       '<div class="col"><label class="f">Fit</label><div class="seg">' +
         '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + '>Crop</button>' +
         '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + '>Whole</button></div></div>' +
@@ -1275,14 +1301,19 @@ function templateThumb(tpl) {
   return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + r + '</svg>';
 }
 
-function inspectorForPage() {
-  const g = geom();
-  return '<div class="side-section">This page<small>Panel ' + (state.active + 1) + ' of 8' +
-      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</small></div>' +
+/* Split so "This page" and "Whole project" can show independently — a phone
+   puts them in separate bottom tabs (see syncPageDrawer() / settings button),
+   and a wide screen's single sidebar column shows exactly one of them (or a
+   selection) at a time too now; see buildInspector(). */
+function pageSectionHtml(withHint = true) {
+  return '<h2>This page</h2>' +
+    // withHint is false for the page drawer's own content: its peek bar
+    // already names the panel, so repeating it here would just be noise.
+    (withHint ? '<div class="hint">Panel ' + (state.active + 1) + ' of 8' +
+      (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</div>' : '') +
 
     '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
-      '<input type="color" data-page="bg" value="' + panel().bg + '"></div>' +
-      '<div class="hint" style="margin-top:10px">' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm</div></div>' +
+      '<input type="color" data-page="bg" value="' + panel().bg + '"></div></div>' +
 
     '<div class="grp"><h2>Layout</h2><div class="tpl-grid">' +
       TEMPLATES.map((t, i) => '<button class="tpl" data-tpl="' + i + '" title="Apply &quot;' +
@@ -1290,9 +1321,13 @@ function inspectorForPage() {
     '</div></div>' +
 
     '<div class="grp"><div class="row">' +
-      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>' +
+      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>';
+}
 
-    '<div class="side-section">Whole project<small>Same on every page</small></div>' +
+function projectSectionHtml() {
+  const g = geom();
+  return '<h2>Whole project</h2>' +
+    '<div class="hint">Same on every page</div>' +
 
     '<div class="grp"><h2>Printer margin</h2>' +
       '<div class="row"><div class="col">' +
@@ -1303,10 +1338,11 @@ function inspectorForPage() {
         '<label class="f" style="margin:0;flex:1">After printing</label>' +
         '<div class="seg"><button data-trim="0"' + on(!state.trimMargin) + '>Leave border</button>' +
         '<button data-trim="1"' + on(state.trimMargin) + '>Trim it off</button></div></div>' +
+      '<div class="hint">Each panel prints ' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm.' +
       (state.trimMargin && state.margin > 0
-        ? '<div class="hint">A cut line prints ' + state.margin + ' mm in from the sheet ' +
-          'edge &mdash; cut along it before folding.</div>'
-        : '') +
+        ? ' A cut line prints ' + state.margin + ' mm in from the sheet ' +
+          'edge &mdash; cut along it before folding.'
+        : '') + '</div>' +
     '</div>' +
 
     '<div class="grp"><h2>Print guides</h2>' +
@@ -1439,8 +1475,13 @@ function syncViewToggle() {
 /* -------------------------------------------------------- the side as a sheet
 
    A phone has no room for a column beside the stage, so under the narrow
-   media query the sidebar sits off the bottom of the screen until asked for.
-   On a wide screen it is always in view and this toggle changes nothing. */
+   media query the sidebar sits off the bottom of the screen until asked for
+   — that part of sideOpen only ever matters there. On a wide screen the
+   column is always in view, so sideOpen means something else there instead:
+   whether the settings button's project view is the one currently showing
+   in it (see buildInspector()). Either way this is the one flag both
+   screens read, so rebuilding the inspector on every flip keeps a wide
+   screen's column in step with it, not just a phone's sheet. */
 let sideOpen = false;
 
 function setSide(open) {
@@ -1448,6 +1489,7 @@ function setSide(open) {
   document.body.classList.toggle('side-open', sideOpen);
   $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
   $('#panelBtn').classList.toggle('on', sideOpen);
+  buildInspector();
 }
 
 /* ---------------------------------------------------- the element's drawer
@@ -1456,7 +1498,8 @@ function setSide(open) {
    project's, never a selected element's, so a selection gets its own bar
    instead of borrowing that one. It appears — closed, as a peeking bar —
    the instant something becomes selected, and disappears the instant
-   nothing is. Opening it is a separate choice, left up to whoever wants it. */
+   nothing is. Opening it is a separate choice, left up to whoever wants it.
+   syncPageDrawer(), below, is its mirror for when nothing is selected. */
 let elemDrawerOpen = false;
 
 function setElemDrawer(open) {
@@ -1478,8 +1521,41 @@ function syncElemDrawer() {
   }
   if (!wasShown) setElemDrawer(false);      // just appeared: start closed, not sprung open
   $('#elemPeekLabel').textContent = elemLabel(el);
-  $('#elemInspector').innerHTML = inspectorForEl(el);
+  $('#elemInspector').innerHTML = inspectorForEl(el, false);
   wireInspector($('#elemInspector'));
+}
+
+/* ------------------------------------------------------- the page's drawer
+
+   The element drawer's mirror image: it shows "This page" (see
+   pageSectionHtml()) instead of a selection, so it appears exactly when
+   syncElemDrawer()'s does not — nothing selected — and the two never
+   contend for the same bottom edge. Same closed-by-default behaviour. */
+let pageDrawerOpen = false;
+
+function setPageDrawer(open) {
+  pageDrawerOpen = !!open;
+  $('#pageDrawer').classList.toggle('open', pageDrawerOpen);
+  $('#pagePeek').setAttribute('aria-expanded', pageDrawerOpen ? 'true' : 'false');
+}
+
+function syncPageDrawer() {
+  const el = selected(), drawer = $('#pageDrawer');
+  const show = narrow() && !el;
+  const wasShown = !drawer.hidden;
+  drawer.hidden = !show;
+  if (!show) {
+    if (wasShown) setPageDrawer(false);     // closed again, ready for next time
+    return;
+  }
+  if (!wasShown) setPageDrawer(false);      // just appeared: start closed, not sprung open
+  // LABELS is just the panel number for pages 2-7, so naming it again in
+  // parens would repeat the number that's already there; cover/back get one
+  // because their name isn't their number.
+  $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) +
+    (isNaN(LABELS[state.active]) ? ' (' + LABELS[state.active] + ')' : '');
+  $('#pageInspector').innerHTML = pageSectionHtml(false);
+  wireInspector($('#pageInspector'));
 }
 
 /* The title, paper size and file buttons live in the toolbar on a wide
@@ -1610,10 +1686,11 @@ function marginNote() {
     'before folding, for an edge-to-edge result.';
 }
 
-/* Shared between #inspector and, on a phone, #elemInspector — each only
-   ever holds markup relevant to itself (data-k and friends are exclusive to
-   inspectorForEl's output, the rest to inspectorForPage's), so wiring both
-   from the same set of selectors is safe. */
+/* Shared between #inspector and, on a phone, #elemInspector / #pageInspector
+   — each only ever holds markup relevant to itself (data-k and friends are
+   exclusive to inspectorForEl's output, the rest to pageSectionHtml's and
+   projectSectionHtml's), so wiring all of them from the same set of
+   selectors is safe. */
 function wireInspector(side) {
   side.querySelectorAll('[data-k]').forEach(node => {
     const k = node.dataset.k;
@@ -1632,7 +1709,14 @@ function wireInspector(side) {
       let v = num ? parseFloat(node.value) : node.value;
       if (num && !isFinite(v)) return;
       if (num && (k === 'w' || k === 'h')) v = Math.max(8, v);
-      if (k === 'rot') v = wrapDeg(v);
+      if (k === 'rot') {
+        v = wrapDeg(v);
+        // A magnetic detent at dead level: only the slider, whose continuous
+        // drag makes 0 hard to land on exactly — the number field is already
+        // exact, so it is left alone. Snapping the thumb too, not just the
+        // value, is what makes it feel like a detent rather than a dead zone.
+        if (node.type === 'range' && Math.abs(v) <= 3) { v = 0; node.value = 0; }
+      }
       el[k] = v;
       paintPage(); paintStripSoon(); syncInspector(); save();
     };
@@ -2206,6 +2290,7 @@ async function init() {
   $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
   $('#sideClose').addEventListener('click', () => setSide(false));
   $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));
+  $('#pagePeek').addEventListener('click', () => setPageDrawer(!pageDrawerOpen));
   $('#viewToggle').addEventListener('click', () => setSingleView(!state.singleView));
   $('#zineFile').addEventListener('change', e => {
     if (e.target.files[0]) openZine(e.target.files[0]);
@@ -2249,6 +2334,14 @@ async function init() {
   });
 
   const stage = $('#stage');
+  // A click on the bare stage — the dark gutter around the sheet, not the
+  // sheet, the strip or the page labels, each of which already handles its
+  // own clicks — clears whatever is selected, the way clicking empty canvas
+  // does elsewhere. click rather than pointerdown so a drag that pans the
+  // stage on touch never gets read as a tap.
+  stage.addEventListener('click', e => {
+    if (selected() && !e.target.closest('.sheet, .strip, .sheet-labels')) select(null);
+  });
   let dragDepth = 0;
   stage.addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth) stage.classList.add('dragging'); });
   stage.addEventListener('dragover', e => e.preventDefault());

@@ -342,21 +342,69 @@ module.exports = {
         setActive(1); addText(); stopEdit();
         const el = selected();
         const drawer = document.getElementById('elemDrawer');
+        const sideText = document.getElementById('inspector').textContent;
         return {
           shown: !drawer.hidden,
           open: drawer.classList.contains('open'),
           label: document.getElementById('elemPeekLabel').textContent,
-          pageStillShowsPage: document.getElementById('inspector').textContent.indexOf('This page') >= 0,
-          pageHasNoElementFields: !document.querySelector('#inspector [data-k]')
+          settingsShowsProjectOnly: sideText.indexOf('Whole project') >= 0 && sideText.indexOf('This page') < 0,
+          pageHasNoElementFields: !document.querySelector('#inspector [data-k]'),
+          pageDrawerHidden: document.getElementById('pageDrawer').hidden
         };
       })()`);
       assert.eq(r.shown, true, 'selecting something should bring the drawer up');
       assert.eq(r.open, false, 'it should appear closed, not sprung open');
       assert.eq(r.label, 'Text', 'the peek should say what is selected');
-      assert.eq(r.pageStillShowsPage, true,
-        'the settings sheet must keep showing the project, not the selection');
+      assert.eq(r.settingsShowsProjectOnly, true,
+        'the settings sheet must keep showing the project, never the page or the selection');
       assert.eq(r.pageHasNoElementFields, true,
         'a selected element\'s own fields must not leak into the settings sheet');
+      assert.eq(r.pageDrawerHidden, true,
+        'the page drawer is for when nothing is selected, so a selection should keep it away');
+    });
+
+    t.check('nothing selected shows the page in its own drawer, not the settings button', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        setActive(1);
+        const drawer = document.getElementById('pageDrawer');
+        const sideText = document.getElementById('inspector').textContent;
+        return {
+          shown: !drawer.hidden,
+          open: drawer.classList.contains('open'),
+          label: document.getElementById('pagePeekLabel').textContent,
+          hasTemplates: !!document.querySelector('#pageInspector [data-tpl]'),
+          settingsShowsProjectOnly: sideText.indexOf('Whole project') >= 0 && sideText.indexOf('This page') < 0
+        };
+      })()`);
+      assert.eq(r.shown, true, 'nothing selected should bring the page drawer up');
+      assert.eq(r.open, false, 'it should appear closed, not sprung open');
+      assert.eq(r.label, 'Panel 2', 'the peek should say which panel, without repeating its number');
+      assert.eq(r.hasTemplates, true, 'the page drawer should hold the layout templates');
+      assert.eq(r.settingsShowsProjectOnly, true,
+        'the settings sheet must keep showing the project, never the page');
+    });
+
+    t.check('selecting something swaps the page drawer for the element drawer, and back', async () => {
+      await phone();
+      const before = await page.evaluate("!document.getElementById('pageDrawer').hidden");
+      assert.eq(before, true, 'the page drawer should be up with nothing selected');
+
+      await page.evaluate(`(() => { setActive(1); addText(); stopEdit(); })()`);
+      const during = await page.evaluate(`({
+        pageHidden: document.getElementById('pageDrawer').hidden,
+        elemShown: !document.getElementById('elemDrawer').hidden
+      })`);
+      assert.eq(during.pageHidden, true, 'selecting something should take the page drawer away');
+      assert.eq(during.elemShown, true, 'and bring the element drawer up instead');
+
+      await page.evaluate('select(null)');
+      const after = await page.evaluate(`({
+        pageShown: !document.getElementById('pageDrawer').hidden,
+        elemHidden: document.getElementById('elemDrawer').hidden
+      })`);
+      assert.eq(after.pageShown, true, 'deselecting should bring the page drawer back');
+      assert.eq(after.elemHidden, true, 'and take the element drawer away again');
     });
 
     t.check('nothing selected means no drawer, and deselecting closes it again', async () => {
@@ -421,6 +469,45 @@ module.exports = {
       assert.eq(wide, true, 'a wide screen has room, so its one sidebar still shows the selection as before');
     });
 
+    t.check('a wide screen shows page settings, not project settings, when nothing is selected', async () => {
+      await page.unemulate();
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        select(null);
+        const text = document.getElementById('inspector').textContent;
+        return { hasPage: text.indexOf('This page') >= 0, hasProject: text.indexOf('Whole project') >= 0 };
+      })()`);
+      assert.eq(r.hasPage, true, 'nothing selected should show the page section');
+      assert.eq(r.hasProject, false, 'project settings should stay behind the settings button');
+    });
+
+    t.check('the settings button swaps the wide sidebar to project settings and back', async () => {
+      await page.unemulate();
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(1); addText(); stopEdit();
+        const beforeText = document.getElementById('inspector').textContent;
+        document.getElementById('panelBtn').click();
+        const openText = document.getElementById('inspector').textContent;
+        const onClass = document.getElementById('panelBtn').classList.contains('on');
+        document.getElementById('panelBtn').click();
+        const closedText = document.getElementById('inspector').textContent;
+        return {
+          beforeHadText: beforeText.indexOf('Text') >= 0,
+          openHasProject: openText.indexOf('Whole project') >= 0,
+          openHasNoSelection: openText.indexOf('Rotate') < 0,
+          onClass: onClass,
+          closedBackToSelection: closedText.indexOf('Text') >= 0
+        };
+      })()`);
+      assert.eq(r.beforeHadText, true, 'a selected text element should show its own controls first');
+      assert.eq(r.openHasProject, true, 'pressing the settings button should show project settings');
+      assert.eq(r.openHasNoSelection, true,
+        'project settings should replace the selection view entirely, not add to it');
+      assert.eq(r.onClass, true, 'the button should show it is pressed');
+      assert.eq(r.closedBackToSelection, true, 'pressing it again should bring the selection view back');
+    });
+
     t.check('the desktop layout comes back on a wide window', async () => {
       await phone();
       await page.evaluate(`(() => {
@@ -433,7 +520,8 @@ module.exports = {
         const side = document.getElementById('side').getBoundingClientRect();
         return { narrow: narrow(), sideRight: Math.round(side.right),
                  inner: innerWidth, sideTop: Math.round(side.top),
-                 toggle: getComputedStyle(document.getElementById('panelBtn')).display,
+                 settingsBtn: getComputedStyle(document.getElementById('panelBtn')).display,
+                 spreadToggle: getComputedStyle(document.getElementById('viewToggle')).display,
                  titleInBar: document.querySelector('.bar #title') === document.getElementById('title'),
                  openInBar: document.querySelector('.bar #openZine') !== null,
                  titleVal: document.getElementById('title').value,
@@ -441,7 +529,8 @@ module.exports = {
                };
       })()`);
       assert.eq(r.narrow, false);
-      assert.eq(r.toggle, 'none', 'the toggle belongs to the phone layout only');
+      assert.ok(r.settingsBtn !== 'none', 'the settings button toggles the project view on a wide screen too');
+      assert.eq(r.spreadToggle, 'none', 'the one/two-page toggle belongs to the phone layout only');
       assert.near(r.sideRight, r.inner, 2, 'the inspector is a column again');
       assert.ok(r.sideTop < 200, 'and runs the height of the window');
       assert.eq(r.titleInBar, true, 'the title input should be back in the toolbar');
