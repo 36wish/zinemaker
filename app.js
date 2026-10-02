@@ -923,6 +923,7 @@ function paintPage() {
   sheet.style.height = g.panelH + 'px';
 
   if (editingId) {                       // never rebuild under a live caret
+    syncGuests(list);
     list.forEach(pi => paintList(pi).forEach(it => restyle(it.el)));
   } else {
     nodes.clear();
@@ -958,6 +959,33 @@ function paintPage() {
   $('#spine').classList.toggle('on', list.length === 2);
   paintLabels(list);
   fitZoom();
+}
+
+/* Under a live caret the sheet is only restyled, never rebuilt — but a copy
+   lent across the fold never holds the caret, so the copies alone can still
+   come and go: one that spanning (or a gesture crossing the fold) now asks
+   for is added at its layer, and one nothing asks for any more is dropped.
+   Without this, "Both pages" on a text box still being typed in would set
+   the flag and leave the other half missing until the typing stopped. */
+function syncGuests(list) {
+  const want = new Set();
+  list.forEach(pi => {
+    const pd = $('#sheet').querySelector('.panel[data-pi="' + pi + '"]');
+    if (!pd) return;
+    paintList(pi).forEach((it, i) => {
+      if (!it.dx) return;
+      want.add(it.el.id);
+      if (guestNodes.has(it.el.id)) return;
+      const n = makeNode(it.el, false, it.dx);
+      n.classList.add('guest');
+      n.dataset.dx = it.dx;
+      guestNodes.set(it.el.id, n);
+      pd.insertBefore(n, pd.children[i] || null);
+    });
+  });
+  guestNodes.forEach((n, id) => {
+    if (!want.has(id)) { n.remove(); guestNodes.delete(id); }
+  });
 }
 
 /* Page names above the sheet; the highlighted one receives new elements.
@@ -1213,6 +1241,21 @@ function rehome() {
   return true;
 }
 
+/* Whether any of an element, rotation included, reaches over the fold onto
+   the facing page — by more than a point, so one snapped flush against the
+   fold does not count. Never, with one page on screen: there is no facing
+   page in view to carry it onto. */
+function overFold(el, pi) {
+  const p = (narrow() && state.singleView) ? null : spanPartner(pi);
+  if (!p) return false;
+  const n = nodes.get(el.id);
+  const h = el.type === 'text' ? (n ? n.offsetHeight : 0) : el.h;
+  const r = (el.rot || 0) * Math.PI / 180;
+  const half = (el.w * Math.abs(Math.cos(r)) + h * Math.abs(Math.sin(r))) / 2;
+  const cx = el.x + el.w / 2;
+  return p.dx < 0 ? cx + half > geom().panelW + 1 : cx - half < -1;
+}
+
 function rotVec(dx, dy, deg) {
   const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
   return { x: dx * c + dy * s, y: -dx * s + dy * c };
@@ -1304,17 +1347,43 @@ function onPagePointerDown(ev) {
     return;
   }
 
+  /* Moving, resizing and rotating can each carry an element over the fold.
+     For the length of the gesture it is lent the second copy a spanning
+     element keeps, so nothing is chopped off at the gutter on the way, and a
+     gesture that leaves it reaching over the fold makes it span: dragged
+     across, it stays across, without a trip to the inspector first. What
+     already reached over when the gesture began keeps its setting — "One
+     page" with it straddling is how you clip at the fold on purpose, and a
+     nudge must not undo that. Lending repaints the sheet, so the gestures
+     look their node up afresh instead of holding on to this one. */
+  const wasOver = overFold(el, findSel().pi);
+  let lent = false;
+  const lend = () => {
+    if (lent || el.span || (narrow() && state.singleView)) return;
+    lent = true; crossingId = el.id; paintPage();
+  };
+  const settle = carry => {
+    crossingId = null;
+    const rehomed = carry && rehome();
+    const f = findSel();
+    const spans = !el.span && !wasOver && !!f && overFold(el, f.pi);
+    if (spans) el.span = true;
+    if (rehomed || spans) buildInspector();
+    paintPage();                      // drops the lent copy, and the snap guides
+  };
+
   if (handle && handle.classList.contains('rot')) {
     const r = node.parentNode.getBoundingClientRect();
     const h = el.type === 'text' ? node.offsetHeight : el.h;
     const cx = r.left + (el.x + el.w / 2) * curZoom;
     const cy = r.top + (el.y + h / 2) * curZoom;
     drag(ev, e => {
+      lend();
       let a = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI + 90;
       if (e.shiftKey) a = Math.round(a / 15) * 15;
       el.rot = wrapDeg(a);
       restyle(el);
-    });
+    }, () => settle(false));
     return;
   }
 
@@ -1322,7 +1391,8 @@ function onPagePointerDown(ev) {
     const east = handle.classList.contains('e');
     const start = pageXY(ev, node), w0 = el.w, h0 = el.h;
     drag(ev, e => {
-      const p = pageXY(e, node);
+      lend();
+      const p = pageXY(e, nodes.get(el.id));
       const d = rotVec(p.x - start.x, p.y - start.y, el.rot || 0);
       const w = Math.max(16, Math.round(w0 + d.x));
       let h = el.h, dh = 0;
@@ -1337,7 +1407,7 @@ function onPagePointerDown(ev) {
       el.w = w;
       if (el.type === 'image') el.h = h;
       restyle(el);
-    });
+    }, () => settle(false));
     return;
   }
 
@@ -1345,20 +1415,16 @@ function onPagePointerDown(ev) {
      panel, because crossing the fold repaints the sheet mid-drag and the node
      this gesture started on is gone by then. */
   const x0 = el.x, y0 = el.y, cx0 = ev.clientX, cy0 = ev.clientY;
-  let lent = false;
   drag(ev, e => {
     let dx = (e.clientX - cx0) / curZoom, dy = (e.clientY - cy0) / curZoom;
     if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
-    if (!lent && !el.span) { lent = true; crossingId = el.id; paintPage(); }
+    lend();
     el.x = Math.round(x0 + dx);
     el.y = Math.round(y0 + dy);
     if (!e.altKey) snapMove(el, nodes.get(el.id));
     clampPos(el, nodes.get(el.id));
     restyle(el);
-  }, () => {
-    crossingId = null;
-    if (rehome()) { buildInspector(); paintPage(); } else paintPage();   // also clears the guides
-  }, e => {
+  }, () => settle(true), e => {
     /* A click that did not move: on text that was already selected, start
        typing where it landed — the second click, not just a double-click,
        is what most editors use. On an empty photo frame, any click is a
@@ -1825,7 +1891,9 @@ function helpHtml() {
       'over the fold. It still belongs to one page &mdash; that is where its ' +
       'handles are &mdash; but it prints straight through the crease onto the ' +
       'facing one, because the two pages of a spread sit side by side on the ' +
-      'sheet. Drag anything over the fold and it moves to the page it lands on.</p>' +
+      'sheet. Dragging or stretching something over the fold does the same by ' +
+      'itself; press <b>One page</b> to stop it at the fold instead. Drag ' +
+      'anything right over and it moves to the page it lands on.</p>' +
     '<p>The fold itself takes a little: expect a hair of the picture to ' +
       'disappear into the crease, and how squarely the halves line up depends on ' +
       'how squarely you fold. Faces and words land badly in the middle &mdash; ' +
@@ -2238,13 +2306,17 @@ function wireInspector(side) {
   }));
 
   /* Spanning is the one property that changes what the fold does to an
-     element, so it repaints both halves rather than just restyling. */
+     element, so it repaints both halves rather than just restyling. A phone
+     showing one page has no facing page on screen for the other half, so
+     asking for both pages brings the spread up, or nothing would visibly
+     change and the element would still look cut off at the page edge. */
   side.querySelectorAll('[data-span]').forEach(b => b.addEventListener('click', () => {
     const el = selected(); if (!el) return;
     const v = b.getAttribute('data-span') === '1';
     if (!!el.span === v) return;
     pushHistory();
     if (v) el.span = true; else delete el.span;
+    if (v && narrow() && state.singleView) { setSingleView(false); return; }   // paints and saves
     paintAll(); save();
   }));
 
