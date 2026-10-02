@@ -359,6 +359,7 @@ module.exports = {
       const r = await page.evaluate(`(() => {
         setActive(1); addText(); stopEdit();
         const el = selected(), node = nodes.get(el.id);
+        select(null);       // a tap on text that is already selected edits it outright
         const r = node.getBoundingClientRect();
         const x = r.left + 8, y = r.top + 8;
         ${TAP}(node, x, y);
@@ -429,7 +430,7 @@ module.exports = {
       })()`);
       assert.eq(r.shown, true, 'nothing selected should bring the page drawer up');
       assert.eq(r.open, false, 'it should appear closed, not sprung open');
-      assert.eq(r.label, 'Panel 2', 'the peek should say which panel, without repeating its number');
+      assert.eq(r.label, 'Page 2', 'the peek should say which page, without repeating its number');
       assert.eq(r.hasTemplates, true, 'the page drawer should hold the layout templates');
       assert.eq(r.settingsShowsProjectOnly, true,
         'the settings sheet must keep showing the project, never the page');

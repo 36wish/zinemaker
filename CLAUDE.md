@@ -54,6 +54,7 @@ than reimplementing it.
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
 | `mobile.test.js` | the phone layout, measured on an emulated handset |
 | `pages.test.js` | the site served over HTTP from a project subpath |
+| `usability.test.js` | settings hand-back, mm fields, labels, photo frames, page turning, snapping, swatches, undo toasts and depth, fold guide |
 
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
 so a test that skips it will inherit the previous one's document. The same goes for
@@ -106,9 +107,15 @@ millimetres, which is what the UI shows the user. Element coordinates are always
 
 One `state` object, autosaved to `localStorage` under `zinemaker.v1` on a debounce,
 and sanitised through `fixDoc()` on load. The document is `state.docs.mini` (8
-panels). Undo/redo snapshots `state.docs` as JSON, capped at 10 entries — these
-snapshots are in-memory only and never touch `localStorage`, so they still carry
-each image element's in-memory `src` in full. Loaders ignore the old `mode`,
+panels). Undo/redo snapshots `state.docs` as JSON, capped at `HISTORY` (100)
+entries. Snapshots are in-memory only and never touch `localStorage`, and they do
+**not** carry photos: `snapshot()` swaps every long `src` for an `@img:n` reference
+into a session-long pool (`srcRef`/`refSrc`) and `restore()` swaps it back, so a
+step costs a few KB however many photos the zine has. **Take snapshots with
+`snapshot()` and record them with `recordHistory()`**, never
+`JSON.stringify(state.docs)` straight into `hist` — `drag()` included — or the
+photos go back into every entry. `recordHistory()` also dismisses an Undo toast,
+since its button would now undo something else. Loaders ignore the old `mode`,
 `spread` and `docs.flat` fields, so files and storage written by earlier versions
 still open.
 
@@ -195,6 +202,45 @@ Two invariants worth knowing before touching it:
   `findSel()` / `elById()` rather than assuming `state.active`. Mutating actions use
   `selPanel()`, not `panel()`.
 
+The inspector shows geometry in **millimetres** — every other number the user sees
+is mm — while the document stays in points. A field marked `data-mm` is converted
+at the edge: `mmv()` on the way out (`inspectorForEl()`, `syncInspector()`) and
+`× PT` in `wireInspector()`'s apply. Font size stays in points, labelled so. Labels
+are plain words ("Line spacing", "Damage tolerance", "Layer order"); the layer
+buttons avoid "Back"/"Front" because the back cover is a page called "back", and
+the UI says **page**, never panel — `panel` is the code's word only.
+
+Colour controls go through `colourField()`: the native picker plus `PRESETS` and
+up to five recent custom colours, as `.sw` buttons carrying the **same target
+attribute** as their picker (`data-k="color"`, `data-page="bg"`…), so one handler
+routes both. Recents are a per-browser convenience under `zinemaker.colours`, not
+document state.
+
+Big, sweeping actions — a layout, clearing a page, deleting, opening a file — act
+at once and call `undoToast()` after their `pushHistory()`, rather than asking
+first with `confirm()`. Only "Start a new zine" still confirms, since undo history
+does not survive a reload.
+
+A **click** that does not move goes to `drag()`'s `onTap`: on text that was already
+selected it starts editing at the click (`caretRangeFromPoint`), and on an empty
+photo frame it opens the picker. The `dblclick` handler must not restart an edit
+already running, or it throws that caret to the end. A move drag also snaps
+(`snapMove()`) to page edges, centres and the printer margin lines of every visible
+page, drawing `.snap-guide`s into `#sheet`; Alt skips it.
+
+### Photo frames
+
+A layout slot with no photo to pour becomes an **empty frame**: an `image` element
+with `src: ''` (`emptyFrame()`). `makeNode()` draws it as a `div.body` inside
+`.el.empty`, and its dashed look is **editor chrome, not `#page-css`**, so the export
+draws nothing there — that is the whole of how frames stay out of print. Real
+photos fill slots before frames do, so reapplying a layout reuses frames instead of
+stacking new ones. `chooseFrame(id)` sets `fillTarget` and opens the file picker;
+`addImageFiles()` puts the first file into that element at its own size (also how
+"Replace photo" works), and dropping a file on a frame fills it. Every storage and
+file path already tolerates `src: ''`: `migrateImages()` gets no bytes from it and
+`saveZine()` keeps it inline.
+
 ### Across the fold
 
 An element with `span` set runs over the gutter onto the facing page. It is still
@@ -274,8 +320,9 @@ column and becomes a sheet that slides up over the stage, toggled by `#panelBtn`
 phone** — it is the only place most controls exist, which is what the earlier
 breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
 
-**`#panelBtn` means the whole project, full stop — never a page or a selected
-element — and that now holds at every width, not just on a phone.**
+**`#panelBtn` ("Print settings" on a wide screen) means the whole project, full
+stop — never a page or a selected element — and that now holds at every width,
+not just on a phone.**
 `inspectorForPage()` is gone; the old "This page" + "Whole project" markup is
 split into `pageSectionHtml()` and `projectSectionHtml()`, and nothing ever
 concatenates them back together. `buildInspector()` puts `projectSectionHtml()`
@@ -286,7 +333,10 @@ width — on a phone it is `#side`'s open/shut sheet state, and on a wide
 screen there is no sheet to open, so it is simply the settings button's own
 toggle for which of the three the one sidebar column is showing — but it is
 the one flag both read, so `setSide()` calls `buildInspector()` on every
-flip and a wide screen's column swaps in place instead of sliding.
+flip and a wide screen's column swaps in place instead of sliding. On a wide
+screen, `buildInspector()` turns the project view back off (`setSideState(false)`)
+as soon as something other than `sideSel` — whatever was selected when it opened —
+is selected, or a fresh selection's controls would be hidden behind it.
 
 On a phone, "This page" and a selection each also get their own independent
 bottom sheet, on top of that column, since there is no room to show either
@@ -313,8 +363,9 @@ nothing is selected and `#pageDrawer` only ever shows when nothing is. On a
 wide screen `#elemDrawer` and `#pageDrawer` stay `hidden`, since the one
 sidebar column already covers what they are for.
 
-The title, paper size and the open/save buttons live in the toolbar on a wide
-screen but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
+The title, paper size and the new/open/save buttons live in the toolbar on a wide
+screen — new/open/save inside the File menu (`#fileWrap`), where `.menu-label`
+gives them long names — but have nowhere to go on a phone, so `MOBILE_SETTINGS` in `app.js` moves
 the real elements — not clones — into a "Document" group at the top of the sheet
 (`#docSettings`, with `#slotTitle`/`#slotPaper`/`#slotOpen`/`#slotSave` as the
 landing spots). `captureMobileAnchors()` drops a comment node in front of each one
@@ -363,7 +414,11 @@ dragged onto a page that is not on screen.
 On a phone, `#viewToggle` and `setSingleView()` let `state.singleView` show just
 `state.active` instead of its spread — `visiblePanels()` is the only other place
 that reads the flag, and only under `narrow()`, so a wide screen ignores it even
-if it was left on. Persisted like `margin`/`cut`/`guides` (`load()` restores it,
+if it was left on. **One page is the phone default**: a spread on a portrait phone
+is half the size. `load()` applies that default unless `viewPref` says the view was
+chosen by hand (`setSingleView()` sets it), since older storage holds an explicit
+`false` that was only ever the old default. The toggle's icon shows the view in
+effect. Persisted like `margin`/`cut`/`guides` (`load()` restores it,
 `save()` writes the whole `state`), but **never written into the `.zine` file** —
 `saveZine()`'s `meta` is an explicit field list and deliberately leaves it out,
 since it is a viewing preference for this screen, not part of the document.
@@ -380,6 +435,12 @@ Touch is not just a narrower mouse:
   they counter-scale with `--iz`, so those sizes are screen pixels.
 - Form controls go to 16px on a narrow screen, below which iOS zooms the whole page
   in when one takes focus.
+- A quick sideways swipe on the stage turns the page (`turnPage()`), read from
+  touch events because the browser cancels the pointer stream on a pan. Not on an
+  element, the strip, or a drawer.
+- With the element drawer open, `keepSelInView()` slides `.paper-wrap` up by a
+  transform just far enough to show the selection above it, and back when it shuts;
+  `curShift` lets it measure from the resting position.
 
 `fitZoom()` measures the strip, the labels and the stage padding rather than
 assuming a desktop window, and `paintStrip()` calls it once the thumbnails exist,
@@ -392,11 +453,26 @@ phone reserves room for whichever of `#elemDrawer` / `#pageDrawer` is peeking
 (always one of them, since they are mutually exclusive — see "Small screens"
 above), so the thumbnail strip scales to fit above it instead of under it.
 
+Pages turn with `turnPage()` — by spread when a spread is showing, by page in
+reading order in one-page view — from `#prevPage`/`#nextPage` (in the stage's
+side gutter on a wide screen, hidden on a phone), Page Up/Down, ←/→ when nothing is
+selected, or a swipe. The thumbnail strip is drawn in `.pair`s following `SPREADS`,
+so it reads exactly as the stage does.
+
+On a wide screen the toolbar must stay one row too: below 1340px the save note and
+the secondary buttons' words (`.btn-label.opt`) go, below 1120px the logo and
+dividers, below 1000px "Export". The add buttons keep their words throughout.
+
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.
 `#sheetBox` is sized to the *scaled* dimensions to keep page layout honest.
 
 ### Export
+
+After a successful export, `showFoldGuide()` opens `#foldDialog` with
+`foldDiagram()` and numbered steps (`foldStepsHtml()`, which follows the trim
+setting). "Don't show after every export" is a per-browser preference under
+`zinemaker.foldGuide`. The harness's `reset()` closes it, since tests export.
 
 `buildSheetNode()` → `rasterize()` → JPEG → `buildPDF()`, with no library at any step:
 

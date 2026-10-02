@@ -67,7 +67,8 @@ let state = {
   trimMargin: false,                // trim that edge off after printing, for an edge-to-edge zine
   cut: true,                        // print a guide along the slit
   guides: false,                    // print dotted panel outlines
-  singleView: false,                // phone only: one panel on screen instead of the spread
+  singleView: true,                 // phone only: one panel on screen instead of the spread
+  viewPref: false,                  // set once singleView has been chosen by hand
   docs: { mini: blankDoc(8) }
 };
 
@@ -166,9 +167,20 @@ async function saveNow() {
   })));
   try {
     localStorage.setItem(KEY, JSON.stringify(Object.assign({}, state, { docs: docs })));
+    setSaveState(true);
   } catch (err) {
-    toast('Browser storage is full — recent changes were not saved.', 5000);
+    setSaveState(false);
+    toast('Browser storage is full — recent changes were not saved. Use File → Save to keep a copy.', 6000);
   }
+}
+
+/* Autosave is otherwise silent, so the toolbar says where the work is: in
+   this browser, which is not a backup — the tooltip points at File → Save. */
+function setSaveState(ok) {
+  const s = $('#saveState');
+  if (!s) return;
+  s.textContent = ok ? 'Saved in this browser' : 'Not saved — storage full';
+  s.classList.toggle('err', !ok);
 }
 
 async function load() {
@@ -187,7 +199,10 @@ async function load() {
       trimMargin: !!s.trimMargin,
       cut: s.cut !== false,
       guides: !!s.guides,
-      singleView: !!s.singleView,
+      // One page at a time is the phone default — a spread on a portrait
+      // screen is half the size — unless someone has picked a view by hand.
+      singleView: s.viewPref ? !!s.singleView : true,
+      viewPref: !!s.viewPref,
       docs: { mini: fixDoc(s.docs.mini, 8) }
     };
     state.active = Math.min(Math.max(0, s.active | 0), doc().panels.length - 1);
@@ -330,22 +345,50 @@ async function hydrateImages() {
 
 /* ------------------------------------------------------------------ history */
 
-function pushHistory() {
-  hist.push(JSON.stringify(state.docs));
-  if (hist.length > 10) hist.shift();
+/* Snapshots keep each image once. A snapshot would otherwise carry every
+   photo's whole data URL, which is what used to hold history to 10 steps;
+   instead each distinct src is pooled the first time it is seen and the
+   snapshot holds a short reference to it. The pool only grows within a
+   session — it is what undo may need to bring back — and is never saved. */
+const HISTORY = 100;
+const srcRef = new Map(), refSrc = new Map();
+
+function snapshot() {
+  return JSON.stringify(state.docs, (k, v) => {
+    if (k !== 'src' || typeof v !== 'string' || v.length < 64) return v;
+    let ref = srcRef.get(v);
+    if (!ref) {
+      ref = '@img:' + srcRef.size;
+      srcRef.set(v, ref); refSrc.set(ref, v);
+    }
+    return ref;
+  });
+}
+
+function restore(snap) {
+  return JSON.parse(snap, (k, v) => k === 'src' && refSrc.has(v) ? refSrc.get(v) : v);
+}
+
+function recordHistory(snap) {
+  hist.push(snap);
+  if (hist.length > HISTORY) hist.shift();
   future.length = 0;
+  dismissUndoToast();            // its Undo would now undo something else
   syncUndo();
 }
+
+function pushHistory() { recordHistory(snapshot()); }
+
 function undo() {
   if (!hist.length) return;
-  future.push(JSON.stringify(state.docs));
-  state.docs = JSON.parse(hist.pop());
+  future.push(snapshot());
+  state.docs = restore(hist.pop());
   afterTimeTravel();
 }
 function redo() {
   if (!future.length) return;
-  hist.push(JSON.stringify(state.docs));
-  state.docs = JSON.parse(future.pop());
+  hist.push(snapshot());
+  state.docs = restore(future.pop());
   afterTimeTravel();
 }
 function afterTimeTravel() {
@@ -379,8 +422,27 @@ function addText() {
   startEdit(el.id, true);
 }
 
+/* A photo frame (or an image being replaced) waiting on the file picker: the
+   next image added goes into it, at its size, instead of onto the page. */
+let fillTarget = null;
+
+function chooseFrame(id) {
+  fillTarget = id;
+  $('#file').click();
+}
+
+function frameById(id) {
+  for (const p of doc().panels) {
+    const el = p.els.find(e => e.id === id);
+    if (el) return el;
+  }
+  return null;
+}
+
 async function addImageFiles(fileList) {
   const files = [...fileList].filter(f => /^image\//.test(f.type));
+  const target = fillTarget ? frameById(fillTarget) : null;
+  fillTarget = null;
   if (!files.length) return;
   toast('Processing ' + files.length + ' image' + (files.length > 1 ? 's' : '') + '...');
   const g = geom();
@@ -389,6 +451,14 @@ async function addImageFiles(fileList) {
     let img;
     try { img = await importImage(f); }
     catch (err) { toast('Could not read ' + f.name, 3000); continue; }
+    if (target && f === files[0]) {
+      // Keeps the frame's own size and place; Fill frame crops to it.
+      target.src = img.src;
+      delete target.assetId;
+      target.fit = target.fit || 'cover';
+      selId = target.id;
+      continue;
+    }
     const maxW = g.panelW * 0.8, maxH = g.panelH * 0.55;
     let w = maxW, h = w * img.h / img.w;
     if (h > maxH) { h = maxH; w = h * img.w / img.h; }
@@ -475,6 +545,7 @@ function removeSel() {
   p.els = p.els.filter(e => e.id !== el.id);
   selId = null;
   paintAll(); save();
+  undoToast('Deleted ' + elemLabel(el).toLowerCase() + '.');
 }
 
 function layer(dir) {
@@ -579,6 +650,11 @@ const TEMPLATES = [
   ] }
 ];
 
+/* An image element with no src yet: drawn as a dashed "Add photo" frame on
+   screen, invisible in export, and filled in place by chooseFrame(). */
+const emptyFrame = () => ({ id: uid(), type: 'image', x: 0, y: 0, w: 10, h: 10, rot: 0,
+  src: '', fit: 'cover', filter: 'none', opacity: 1, radius: 0 });
+
 function slotDefault(s) {
   if (s.t === 'qr') {
     return { id: uid(), type: 'qr', x: 0, y: 0, w: 10, h: 10, rot: 0,
@@ -599,6 +675,8 @@ function applyTemplate(tpl) {
   const p = panel(), g = geom();
   const pool = { text: [], image: [], qr: [] };
   p.els.forEach(e => { if (pool[e.type]) pool[e.type].push(e); });
+  // Real photos take the slots first; empty frames only fill what is left.
+  pool.image.sort((a, b) => (a.src ? 0 : 1) - (b.src ? 0 : 1));
 
   /* A spread layout is laid out from the left-hand page's left edge, so on a
      right-hand page the whole thing shifts back by a panel to land there. */
@@ -609,8 +687,8 @@ function applyTemplate(tpl) {
   tpl.slots.forEach(s => {
     let el = pool[s.t].shift();
     if (!el) {
-      if (s.t === 'image') return;        // no photo to put here: leave it empty
-      el = slotDefault(s);
+      // No photo to put here: an empty frame to fill, not a missing slot.
+      el = s.t === 'image' ? emptyFrame() : slotDefault(s);
     }
     used[el.id] = 1;
     el.x = Math.round(s.x * g.panelW + originX);
@@ -635,7 +713,7 @@ function applyTemplate(tpl) {
   p.els = placed;
   selId = null;
   paintAll(); save();
-  toast('Applied "' + tpl.n + '" to ' + LABELS[state.active], 2000);
+  undoToast('Applied "' + tpl.n + '" to page ' + (state.active + 1) + '.');
 }
 
 /* ----------------------------------------------------------------- drawing */
@@ -726,7 +804,7 @@ function styleNode(node, el, dx) {
     el.h = el.w;                       // a QR code is always square
     s.height = el.w + 'px';
     paintQr(node, el);
-  } else {
+  } else if (body.tagName === 'IMG') {
     if (body.getAttribute('src') !== el.src) body.setAttribute('src', el.src);
     body.className = 'body' + (el.filter && el.filter !== 'none' ? ' f-' + el.filter : '');
     body.style.objectFit = el.fit || 'cover';
@@ -747,6 +825,15 @@ function makeNode(el, interactive, dx) {
     const ph = document.createElementNS(SVGNS, 'svg');       // replaced by paintQr
     ph.setAttribute('class', 'body');
     d.appendChild(ph);
+  } else if (!el.src) {
+    /* An empty photo frame, left by a layout. Its look is editor chrome, not
+       #page-css, so it shows on screen and in the thumbnails but exports as
+       nothing at all. */
+    d.classList.add('empty');
+    const b = document.createElement('div');
+    b.className = 'body';
+    if (interactive) b.innerHTML = '<span class="frame-hint">+ Add photo</span>';
+    d.appendChild(b);
   } else {
     const img = document.createElement('img');
     img.className = 'body';
@@ -777,6 +864,9 @@ function chopBands(pi) {
     const b = document.createElement('div');
     b.className = 'band band-' + side;
     b.style[(side === 't' || side === 'b') ? 'height' : 'width'] = (e[side] * PT) + 'px';
+    // Every page loses its bottom edge, so that band says what the stripes
+    // mean; it is editor chrome and never reaches the export.
+    if (side === 'b') b.innerHTML = '<span>Print margin</span>';
     wrap.appendChild(b);
   });
   return wrap.firstChild ? wrap : null;
@@ -864,6 +954,7 @@ function paintPage() {
     });
   }
   markSelected();
+  syncNav();
   $('#spine').classList.toggle('on', list.length === 2);
   paintLabels(list);
   fitZoom();
@@ -881,11 +972,41 @@ function paintLabels(list) {
     const pill = document.createElement('i');
     pill.textContent = LABELS[pi];
     s.appendChild(pill);
-    s.title = 'Panel ' + (pi + 1);
+    s.title = 'Page ' + (pi + 1);
     if (pi === state.active) s.className = 'on';
     s.addEventListener('click', () => { setActive(pi); select(null); });
     row.appendChild(s);
   });
+}
+
+/* ------------------------------------------------------------ page turning
+
+   Next/previous goes by spread (back|cover, 2|3, 4|5, 6|7) when the spread
+   is on screen, and by page in reading order when a phone shows one at a
+   time. A spread is entered on its lower-numbered page — the cover for the
+   outside spread — which is where new things then land. */
+function turnTarget(dir) {
+  if (narrow() && state.singleView) {
+    const n = state.active + dir;
+    return n >= 0 && n < 8 ? n : null;
+  }
+  const i = SPREADS.findIndex(s => s.indexOf(state.active) >= 0) + dir;
+  return i >= 0 && i < SPREADS.length ? Math.min.apply(null, SPREADS[i]) : null;
+}
+
+function turnPage(dir) {
+  const to = turnTarget(dir);
+  if (to == null) return false;
+  stopEdit();
+  setActive(to);
+  return true;
+}
+
+function syncNav() {
+  const prev = $('#prevPage'), next = $('#nextPage');
+  if (!prev) return;
+  prev.disabled = turnTarget(-1) == null;
+  next.disabled = turnTarget(1) == null;
 }
 
 function setActive(pi) {
@@ -926,29 +1047,39 @@ function paintStrip() {
   const tz = (narrow() ? 46 : 58) / g.panelH;   // all eight have to fit a phone
   const shown = visiblePanels();
   strip.textContent = '';
-  doc().panels.forEach((p, i) => {
-    const b = document.createElement('button');
-    b.className = 'thumb' + (i === state.active ? ' on'
-                           : shown.indexOf(i) >= 0 ? ' facing' : '');
-    b.title = 'Panel ' + (i + 1) + ' (' + LABELS[i] + ')';
-    const tp = document.createElement('div');
-    tp.className = 'tp';
-    tp.style.width = g.panelW * tz + 'px';
-    tp.style.height = g.panelH * tz + 'px';
-    const mini = document.createElement('div');
-    mini.className = 'panel';
-    mini.style.cssText = 'width:' + g.panelW + 'px;height:' + g.panelH + 'px;' +
-                         'background:' + p.bg + ';transform:scale(' + tz + ')';
-    paintList(i).forEach(it => mini.appendChild(makeNode(it.el, false, it.dx)));
-    tp.appendChild(mini);
-    const lbl = document.createElement('span');
-    lbl.className = 'tl';
-    lbl.textContent = LABELS[i];
-    b.appendChild(tp); b.appendChild(lbl);
-    b.addEventListener('click', () => setActive(i));
-    strip.appendChild(b);
+  /* Grouped the way the sheet shows them — back|cover, 2|3, 4|5, 6|7 — so
+     each pair in the strip is exactly a spread on the stage. */
+  SPREADS.forEach(pair => {
+    const box = document.createElement('div');
+    box.className = 'pair';
+    pair.forEach(i => box.appendChild(thumbFor(i, g, tz, shown)));
+    strip.appendChild(box);
   });
   fitZoom();                 // the strip's height is part of the sheet's budget
+}
+
+function thumbFor(i, g, tz, shown) {
+  const p = doc().panels[i];
+  const b = document.createElement('button');
+  b.className = 'thumb' + (i === state.active ? ' on'
+                         : shown.indexOf(i) >= 0 ? ' facing' : '');
+  b.title = 'Page ' + (i + 1) + ' (' + LABELS[i] + ')';
+  const tp = document.createElement('div');
+  tp.className = 'tp';
+  tp.style.width = g.panelW * tz + 'px';
+  tp.style.height = g.panelH * tz + 'px';
+  const mini = document.createElement('div');
+  mini.className = 'panel';
+  mini.style.cssText = 'width:' + g.panelW + 'px;height:' + g.panelH + 'px;' +
+                       'background:' + p.bg + ';transform:scale(' + tz + ')';
+  paintList(i).forEach(it => mini.appendChild(makeNode(it.el, false, it.dx)));
+  tp.appendChild(mini);
+  const lbl = document.createElement('span');
+  lbl.className = 'tl';
+  lbl.textContent = LABELS[i];
+  b.appendChild(tp); b.appendChild(lbl);
+  b.addEventListener('click', () => setActive(i));
+  return b;
 }
 
 /* Thumbnails redraw every panel, so coalesce bursts (typing, dragging). */
@@ -984,7 +1115,7 @@ function elById(id) {
   return null;
 }
 
-function startEdit(id, selectAll) {
+function startEdit(id, selectAll, at) {
   const el = elById(id);
   const node = nodes.get(id);
   if (!el || el.type !== 'text' || !node) return;
@@ -994,9 +1125,14 @@ function startEdit(id, selectAll) {
   body.setAttribute('contenteditable', 'plaintext-only');
   if (body.contentEditable !== 'plaintext-only') body.setAttribute('contenteditable', 'true');
   body.focus();
-  const range = document.createRange();
+  let range = document.createRange();
   range.selectNodeContents(body);
   if (!selectAll) range.collapse(false);
+  // Clicked into the text: put the caret where the click was, not at the end.
+  if (at && document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(at.x, at.y);
+    if (r && body.contains(r.startContainer)) range = r;
+  }
   const sel = window.getSelection();
   sel.removeAllRanges(); sel.addRange(range);
   body.oninput = () => {
@@ -1095,8 +1231,8 @@ function anchorFix(el, dw, dh) {
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
 let dragging = false;
-function drag(ev, onMove, onEnd) {
-  const snap = JSON.stringify(state.docs);
+function drag(ev, onMove, onEnd, onTap) {
+  const snap = snapshot();
   let moved = false;
   dragging = true;
   const move = e => {
@@ -1105,10 +1241,7 @@ function drag(ev, onMove, onEnd) {
     if (!moved) {
       moved = true;
       lastTap.id = null;            // a gesture that moved is not half a tap
-      hist.push(snap);
-      if (hist.length > 10) hist.shift();
-      future.length = 0;
-      syncUndo();
+      recordHistory(snap);
     }
     onMove(e);
   };
@@ -1124,6 +1257,8 @@ function drag(ev, onMove, onEnd) {
     if (moved) {
       if (onEnd) onEnd();
       paintStripSoon(); syncInspector(); save();
+    } else if (onTap && e && e.type === 'pointerup') {
+      onTap(e);
     }
   };
   window.addEventListener('pointermove', move);
@@ -1157,6 +1292,7 @@ function onPagePointerDown(ev) {
   if (!elById(id)) { setActive(pi); stopEdit(); select(null); return; }
   if (editingId === id && !handle) return;       // let the caret do its job
   ev.preventDefault();
+  const wasSelected = selId === id;
   setActive(pi);                                 // both may rebuild every node
   select(id);
   const el = selected();
@@ -1216,12 +1352,84 @@ function onPagePointerDown(ev) {
     if (!lent && !el.span) { lent = true; crossingId = el.id; paintPage(); }
     el.x = Math.round(x0 + dx);
     el.y = Math.round(y0 + dy);
+    if (!e.altKey) snapMove(el, nodes.get(el.id));
     clampPos(el, nodes.get(el.id));
     restyle(el);
   }, () => {
     crossingId = null;
-    if (rehome()) { buildInspector(); paintPage(); } else paintPage();
+    if (rehome()) { buildInspector(); paintPage(); } else paintPage();   // also clears the guides
+  }, e => {
+    /* A click that did not move: on text that was already selected, start
+       typing where it landed — the second click, not just a double-click,
+       is what most editors use. On an empty photo frame, any click is a
+       request for a photo. */
+    if (el.type === 'image' && !el.src) chooseFrame(el.id);
+    else if (wasSelected && el.type === 'text') startEdit(el.id, false, { x: e.clientX, y: e.clientY });
   });
+}
+
+/* ------------------------------------------------------------------- snap
+
+   While dragging, an element's left edge, centre or right edge (and top,
+   middle, bottom) pulls onto the nearest page edge, page centre or printer
+   margin line within a few screen pixels, and a guide line shows which.
+   Alt drags freely. Works in the owning panel's own coordinates; the facing
+   page's lines are offset by a panel width, which is also what lets a
+   spanning element centre on the fold. */
+const SNAP_PX = 6;
+
+function snapLines(pi) {
+  const g = geom(), list = visiblePanels(), at = list.indexOf(pi);
+  const xs = [], ys = [];
+  list.forEach((p, j) => {
+    const o = (j - at) * g.panelW, e = unsafeEdges(p) || { l: 0, r: 0, t: 0, b: 0 };
+    xs.push(o, o + g.panelW / 2, o + g.panelW);
+    if (e.l) xs.push(o + e.l * PT);
+    if (e.r) xs.push(o + g.panelW - e.r * PT);
+    if (j === at) {
+      ys.push(0, g.panelH / 2, g.panelH);
+      if (e.t) ys.push(e.t * PT);
+      if (e.b) ys.push(g.panelH - e.b * PT);
+    }
+  });
+  return { xs: xs, ys: ys, at: Math.max(0, at) };
+}
+
+function snapMove(el, node) {
+  clearGuides();
+  const f = findSel();
+  if (!f || !node) return;
+  const lines = snapLines(f.pi), thr = SNAP_PX / curZoom;
+  const h = el.type === 'text' ? node.offsetHeight : el.h;
+  const best = (pts, cands) => {
+    let hit = null;
+    pts.forEach(p => cands.forEach(c => {
+      const d = c - p;
+      if (Math.abs(d) <= thr && (!hit || Math.abs(d) < Math.abs(hit.d))) hit = { d: d, at: c };
+    }));
+    return hit;
+  };
+  const bx = best([el.x, el.x + el.w / 2, el.x + el.w], lines.xs);
+  const by = best([el.y, el.y + h / 2, el.y + h], lines.ys);
+  const g = geom(), sheet = $('#sheet');
+  if (bx) {
+    el.x = Math.round(el.x + bx.d);
+    const v = document.createElement('div');
+    v.className = 'snap-guide v';
+    v.style.left = (lines.at * g.panelW + bx.at) + 'px';
+    sheet.appendChild(v);
+  }
+  if (by) {
+    el.y = Math.round(el.y + by.d);
+    const hz = document.createElement('div');
+    hz.className = 'snap-guide h';
+    hz.style.top = by.at + 'px';
+    sheet.appendChild(hz);
+  }
+}
+
+function clearGuides() {
+  document.querySelectorAll('#sheet .snap-guide').forEach(n => n.remove());
 }
 
 function onKey(e) {
@@ -1241,7 +1449,14 @@ function onKey(e) {
   if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
   if (e.key === 'Escape' && pageDrawerOpen) { setPageDrawer(false); return; }
   if (e.key === 'Escape') { select(null); return; }
+  if (e.key === 'PageDown' || e.key === 'PageUp') {
+    e.preventDefault(); turnPage(e.key === 'PageDown' ? 1 : -1); return;
+  }
   const el = selected();
+  // With nothing selected the arrows have nothing to nudge, so they turn pages.
+  if (!el && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    e.preventDefault(); turnPage(e.key === 'ArrowRight' ? 1 : -1); return;
+  }
   if (!el) return;
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSel(); return; }
   if (e.key === 'Enter' && el.type === 'text') { e.preventDefault(); startEdit(el.id, true); return; }
@@ -1311,6 +1526,11 @@ function foldDiagram() {
    flips, so pressing the button swaps the column in place. */
 function buildInspector() {
   const side = $('#inspector'), el = selected();
+  /* On a wide screen the settings view is the only thing in the one column,
+     so leaving it up while the user picks something else on the page would
+     hide that thing's controls with no clue why. Selecting anything other
+     than what was selected when settings opened hands the column back. */
+  if (sideOpen && !narrow() && el && el.id !== sideSel) setSideState(false);
   side.innerHTML = (narrow() || sideOpen) ? projectSectionHtml() : (el ? inspectorForEl(el) : pageSectionHtml());
   wireInspector(side);
   syncElemDrawer();
@@ -1318,23 +1538,47 @@ function buildInspector() {
   paintHelp();
 }
 
+/* Geometry is stored in points, like everything else, but every other number
+   the user sees is in millimetres — so these fields show and take mm, and
+   wireInspector()/syncInspector() convert at the edge (see data-mm). */
+const mmv = pt => +(pt / PT).toFixed(1);
+
+function mmField(label, k, el, title) {
+  return '<div class="col"><label class="f" title="' + title + '">' + label + '</label>' +
+    '<input class="num grow" type="number" step="0.5" data-k="' + k + '" data-num data-mm value="' +
+    mmv(el[k]) + '"></div>';
+}
+
+const ICON = {
+  left:   '<path d="M2 3.5h12M2 6.5h8M2 9.5h12M2 12.5h8"/>',
+  center: '<path d="M2 3.5h12M4 6.5h8M2 9.5h12M4 12.5h8"/>',
+  right:  '<path d="M2 3.5h12M6 6.5h8M2 9.5h12M6 12.5h8"/>'
+};
+const icon = d => '<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round">' + d + '</svg>';
+
 function inspectorForEl(el, withHeading = true) {
+  const sizeRow = el.type === 'image'
+    ? mmField('Width mm', 'w', el, 'Width in millimetres') + mmField('Height mm', 'h', el, 'Height in millimetres')
+    : mmField(el.type === 'qr' ? 'Size mm' : 'Width mm', 'w', el, 'Width in millimetres');
   const common =
-    '<div class="grp"><div class="row">' +
-      '<div class="col"><label class="f">Rotate</label>' +
+    '<div class="grp"><h2>Position</h2><div class="row">' +
+      mmField('From left mm', 'x', el, 'Distance from the left edge of its page, in millimetres') +
+      mmField('From top mm', 'y', el, 'Distance from the top edge of its page, in millimetres') +
+    '</div><div class="row">' + sizeRow + '</div><div class="row">' +
+      '<div class="col"><label class="f">Rotation</label>' +
         '<input type="range" data-k="rot" data-num min="-180" max="180" step="1" value="' + el.rot + '"></div>' +
-      '<div><label class="f">&deg;</label><input class="num" type="number" data-k="rot" data-num value="' + el.rot + '"></div>' +
-    '</div><div class="row">' +
-      '<div class="col"><label class="f">X</label><input class="num grow" type="number" data-k="x" data-num value="' + el.x + '"></div>' +
-      '<div class="col"><label class="f">Y</label><input class="num grow" type="number" data-k="y" data-num value="' + el.y + '"></div>' +
-      '<div class="col"><label class="f">W</label><input class="num grow" type="number" data-k="w" data-num value="' + el.w + '"></div>' +
+      '<div><label class="f">Degrees</label><input class="num" type="number" data-k="rot" data-num value="' + el.rot + '"></div>' +
     '</div></div>' +
     '<div class="grp"><label class="f">Across the fold</label><div class="seg" style="margin-bottom:8px">' +
       '<button data-span="0"' + on(!el.span) + '>One page</button>' +
       '<button data-span="1"' + on(!!el.span) + '>Both pages</button></div></div>' +
-    '<div class="grp"><label class="f">Arrange</label><div class="seg" style="margin-bottom:8px">' +
-      '<button data-layer="back">Back</button><button data-layer="-1">&minus;</button>' +
-      '<button data-layer="1">+</button><button data-layer="front">Front</button></div>' +
+    // Not "Back"/"Front": the back cover is a page called "back".
+    '<div class="grp"><label class="f">Layer order</label><div class="seg" style="margin-bottom:8px">' +
+      '<button data-layer="back" title="Send behind everything">Bottom</button>' +
+      '<button data-layer="-1" title="Send back one layer">Lower</button>' +
+      '<button data-layer="1" title="Bring forward one layer">Raise</button>' +
+      '<button data-layer="front" title="Bring in front of everything">Top</button></div>' +
     '<div class="row"><button class="grow" data-act="dup">Duplicate</button>' +
       '<button class="grow" data-act="del">Delete</button></div></div>';
 
@@ -1343,53 +1587,64 @@ function inspectorForEl(el, withHeading = true) {
   if (el.type === 'text') {
     return (withHeading ? '<h2>Text</h2>' : '') +
       '<div class="grp"><div class="row">' +
-        '<select class="grow" data-k="font" data-num>' +
+        '<button class="grow" data-act="edit">Edit text</button>' +
+      '</div><div class="row">' +
+        '<div class="col"><label class="f">Font</label><select class="grow" style="width:100%" data-k="font" data-num aria-label="Font">' +
           FONTS.map((f, i) => '<option value="' + i + '"' + (i === el.font ? ' selected' : '') +
             ' style="font-family:' + esc(f.c) + '">' + esc(f.n) + '</option>').join('') +
-        '</select>' +
+        '</select></div>' +
+        '<div style="width:72px;flex:none"><label class="f" title="Font size in points">Size pt</label><input class="num" style="width:100%" type="number" min="4" max="200" data-k="size" data-num value="' + el.size + '"></div>' +
       '</div><div class="row">' +
-        '<div class="col"><label class="f">Size</label><input class="num grow" type="number" min="4" max="200" data-k="size" data-num value="' + el.size + '"></div>' +
-        '<div class="col"><label class="f">Line</label><input class="num grow" type="number" step="0.05" data-k="lh" data-num value="' + el.lh + '"></div>' +
-        '<div class="col"><label class="f">Track</label><input class="num grow" type="number" step="0.2" data-k="ls" data-num value="' + el.ls + '"></div>' +
+        '<div class="col"><label class="f">Line spacing</label><input class="num grow" type="number" step="0.05" data-k="lh" data-num value="' + el.lh + '"></div>' +
+        '<div class="col"><label class="f">Letter spacing</label><input class="num grow" type="number" step="0.2" data-k="ls" data-num value="' + el.ls + '"></div>' +
       '</div><div class="row">' +
-        '<div class="seg grow"><button data-k="align" data-v="left"' + on(el.align === 'left') + '>L</button>' +
-        '<button data-k="align" data-v="center"' + on(el.align === 'center') + '>C</button>' +
-        '<button data-k="align" data-v="right"' + on(el.align === 'right') + '>R</button></div>' +
-        '<div class="seg"><button data-k="bold" data-toggle' + on(el.bold) + ' style="font-weight:800">B</button>' +
-        '<button data-k="italic" data-toggle' + on(el.italic) + ' style="font-style:italic">I</button></div>' +
-      '</div><div class="row">' +
-        '<label class="f" style="margin:0;flex:1">Ink</label><input type="color" data-k="color" value="' + el.color + '">' +
-        '<label class="f" style="margin:0 0 0 10px">Box</label><input type="color" data-k="bg" value="' + (el.bg || '#ffffff') + '">' +
-        '<button data-act="nobg" title="No box background">&#10005;</button>' +
-      '</div></div>' + common;
+        '<div class="seg grow">' +
+          ['left', 'center', 'right'].map(a => '<button data-k="align" data-v="' + a + '"' +
+            on(el.align === a) + ' title="Align ' + a + '" aria-label="Align ' + a + '">' +
+            icon(ICON[a]) + '</button>').join('') + '</div>' +
+        '<div class="seg"><button data-k="bold" data-toggle' + on(el.bold) + ' style="font-weight:800" title="Bold" aria-label="Bold">B</button>' +
+        '<button data-k="italic" data-toggle' + on(el.italic) + ' style="font-style:italic" title="Italic" aria-label="Italic">I</button></div>' +
+      '</div>' +
+      colourField('Colour', 'data-k="color"', el.color) +
+      colourField('Background', 'data-k="bg"', el.bg || '', true) +
+      '</div>' + common;
   }
 
   if (el.type === 'qr') {
     const q = qrFor(el.text || '', el.ecl || 'M');
+    const level = { L: 'Low', M: 'Normal', Q: 'High', H: 'Highest' };
     return (withHeading ? '<h2>QR code</h2>' : '') +
       '<div class="grp"><div class="row">' +
         '<div class="col"><label class="f">Links to</label>' +
         '<input class="grow" type="text" data-k="text" value="' + esc(el.text || '') + '"></div>' +
       '</div><div class="row">' +
-        '<div class="col"><label class="f">Correction</label><select class="grow" data-k="ecl">' +
+        '<div class="col"><label class="f" title="How much smudging or damage the code survives">Damage tolerance</label>' +
+        '<select class="grow" data-k="ecl">' +
           QR.LEVELS.map(L => '<option value="' + L + '"' + (el.ecl === L ? ' selected' : '') +
-            '>' + L + (L === 'M' ? ' (normal)' : L === 'H' ? ' (toughest)' : '') + '</option>').join('') +
+            '>' + (level[L] || L) + '</option>').join('') +
         '</select></div>' +
-        '<div><label class="f">Quiet</label>' +
+        '<div><label class="f" title="Blank border around the code, in code squares">Border</label>' +
         '<input class="num" type="number" min="0" max="8" data-k="quiet" data-num value="' +
         (el.quiet == null ? 4 : el.quiet) + '"></div>' +
-      '</div><div class="row">' +
-        '<label class="f" style="margin:0;flex:1">Ink</label><input type="color" data-k="dark" value="' + (el.dark || '#111111') + '">' +
-        '<label class="f" style="margin:0 0 0 10px">Paper</label><input type="color" data-k="light" value="' + (el.light || '#ffffff') + '">' +
-      '</div><div class="hint">' +
-        (q.ok ? 'version ' + q.version + ', ' + q.size + '×' + q.size +
-                ' modules — prints ' + mm(el.w) + ' mm wide'
-              : '<b style="color:var(--accent)">Too much data.</b> Shorten the link or lower the correction level.') +
+      '</div>' +
+      colourField('Colour', 'data-k="dark"', el.dark || '#111111') +
+      colourField('Background', 'data-k="light"', el.light || '#ffffff') +
+      '<div class="hint">' +
+        (q.ok ? 'Prints ' + mm(el.w) + ' mm wide'
+              : '<b style="color:var(--accent)">Too much data.</b> Shorten the link or lower the damage tolerance.') +
       '</div></div>' + common;
   }
 
+  if (!el.src) {                         // an empty photo frame from a layout
+    return (withHeading ? '<h2>Photo frame</h2>' : '') +
+      '<div class="grp"><div class="row">' +
+        '<button class="grow primary" data-act="fill">Choose photo&hellip;</button></div></div>' + common;
+  }
+
   return (withHeading ? '<h2>Image</h2>' : '') +
-    '<div class="grp"><label class="f">Effect</label><div class="filter-grid">' +
+    '<div class="grp"><div class="row">' +
+      '<button class="grow" data-act="fill">Replace photo&hellip;</button></div>' +
+    '<label class="f">Effect</label><div class="filter-grid">' +
       FILTERS.map(f => '<button class="swatch' + ((el.filter || 'none') === f.v ? ' on' : '') +
         '" data-k="filter" data-v="' + f.v + '" title="' + esc(f.n) + '">' +
         '<img class="' + (f.v === 'none' ? '' : 'f-' + f.v) + '" src="' + esc(el.src || '') + '">' +
@@ -1397,14 +1652,50 @@ function inspectorForEl(el, withHeading = true) {
     '</div></div>' +
     '<div class="grp"><div class="row">' +
       '<div class="col"><label class="f">Fit</label><div class="seg">' +
-        '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + '>Crop</button>' +
-        '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + '>Whole</button></div></div>' +
+        '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + ' title="Fill the frame, cropping the edges">Fill frame</button>' +
+        '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + ' title="Show the whole photo">Whole photo</button></div></div>' +
     '</div><div class="row">' +
       '<div class="col"><label class="f">Opacity</label><input type="range" min="0.05" max="1" step="0.05" data-k="opacity" data-num value="' + (el.opacity == null ? 1 : el.opacity) + '"></div>' +
-      '<div><label class="f">Round</label><input class="num" type="number" min="0" data-k="radius" data-num value="' + (el.radius || 0) + '"></div>' +
-    '</div><div class="row">' +
-      '<div class="col"><label class="f">H</label><input class="num grow" type="number" data-k="h" data-num value="' + el.h + '"></div>' +
+      '<div><label class="f">Corner radius</label><input class="num" type="number" min="0" data-k="radius" data-num value="' + (el.radius || 0) + '"></div>' +
     '</div></div>' + common;
+}
+
+/* ------------------------------------------------------------ colour swatches
+
+   The native picker is a heavy dialog, especially on a phone, so each colour
+   control also offers a row of presets and the last few custom colours used.
+   Recents are a per-browser convenience, not part of the document, so they
+   live under their own localStorage key and never reach a .zine file. */
+const PRESETS = ['#111111', '#ffffff', '#ff4f6d', '#ff8c42', '#ffd23f',
+                 '#2ec4b6', '#3a86ff', '#8d99ae'];
+const RECENT_KEY = 'zinemaker.colours';
+let recentColours = [];
+try { recentColours = JSON.parse(localStorage.getItem(RECENT_KEY)) || []; } catch (err) { /* private mode */ }
+
+function rememberColour(c) {
+  c = String(c || '').toLowerCase();
+  if (!/^#[0-9a-f]{6}$/.test(c) || PRESETS.indexOf(c) >= 0) return;
+  recentColours = [c].concat(recentColours.filter(x => x !== c)).slice(0, 5);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentColours)); } catch (err) { /* full */ }
+}
+
+/* target is the attribute the picker carries — data-k="…" for an element
+   property, data-page="bg" for the page colour — and the swatches carry it
+   too, so wireInspector() routes a swatch exactly the way it routes a picker.
+   allowNone adds a "no colour" swatch (text background). */
+function colourField(label, target, value, allowNone) {
+  const cur = String(value || '').toLowerCase();
+  const sw = c => '<button class="sw' + (cur === c ? ' on' : '') + '" ' + target +
+    ' data-c="' + c + '" style="background:' + c + '" title="' + c + '" aria-label="' + c + '"></button>';
+  return '<div class="cfield"><div class="row">' +
+      '<label class="f" style="margin:0;flex:1">' + label + '</label>' +
+      '<input type="color" ' + target + ' value="' + (cur || '#ffffff') + '" title="Custom colour" aria-label="' + label + ', custom colour">' +
+    '</div><div class="swatches">' +
+      (allowNone ? '<button class="sw none' + (cur ? '' : ' on') + '" ' + target +
+        ' data-c="" title="None" aria-label="No ' + label.toLowerCase() + '"></button>' : '') +
+      PRESETS.map(sw).join('') +
+      recentColours.filter(c => PRESETS.indexOf(c) < 0).map(sw).join('') +
+    '</div></div>';
 }
 
 const on = b => b ? ' class="on"' : '';
@@ -1450,11 +1741,10 @@ function pageSectionHtml(withHint = true) {
   return '<h2>This page</h2>' +
     // withHint is false for the page drawer's own content: its peek bar
     // already names the panel, so repeating it here would just be noise.
-    (withHint ? '<div class="hint">Panel ' + (state.active + 1) + ' of 8' +
+    (withHint ? '<div class="hint">Page ' + (state.active + 1) + ' of 8' +
       (isNaN(LABELS[state.active]) ? ' &mdash; ' + LABELS[state.active] : '') + '</div>' : '') +
 
-    '<div class="grp"><div class="row"><label class="f" style="margin:0;flex:1">Panel colour</label>' +
-      '<input type="color" data-page="bg" value="' + panel().bg + '"></div></div>' +
+    '<div class="grp">' + colourField('Page colour', 'data-page="bg"', panel().bg) + '</div>' +
 
     '<div class="grp"><h2>Layout</h2><div class="tpl-grid">' +
       TEMPLATES.map((t, i) => '<button class="tpl" data-tpl="' + i + '" title="Apply &quot;' +
@@ -1462,7 +1752,7 @@ function pageSectionHtml(withHint = true) {
     '</div></div>' +
 
     '<div class="grp"><div class="row">' +
-      '<button class="grow" data-act="clearPanel">Clear this panel</button></div></div>';
+      '<button class="grow" data-act="clearPanel">Clear this page</button></div></div>';
 }
 
 function projectSectionHtml() {
@@ -1479,7 +1769,7 @@ function projectSectionHtml() {
         '<label class="f" style="margin:0;flex:1">After printing</label>' +
         '<div class="seg"><button data-trim="0"' + on(!state.trimMargin) + '>Leave border</button>' +
         '<button data-trim="1"' + on(state.trimMargin) + '>Trim it off</button></div></div>' +
-      '<div class="hint">Each panel prints ' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm.' +
+      '<div class="hint">Each page prints ' + mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm.' +
       (state.trimMargin && state.margin > 0
         ? ' A cut line prints ' + state.margin + ' mm in from the sheet ' +
           'edge &mdash; cut along it before folding.'
@@ -1488,7 +1778,7 @@ function projectSectionHtml() {
 
     '<div class="grp"><h2>Print guides</h2>' +
       '<div class="row">' +
-        '<label class="f" style="margin:0;flex:1">Panel outlines</label>' +
+        '<label class="f" style="margin:0;flex:1">Page outlines</label>' +
         '<div class="seg"><button data-guides="0"' + on(!state.guides) + '>Off</button>' +
         '<button data-guides="1"' + on(state.guides) + '>On</button></div></div>' +
       '<div class="row">' +
@@ -1510,17 +1800,25 @@ function helpHtml() {
 
     '<h3>Editing</h3>' +
     '<p>Each spread shows the two pages that face each other when the zine is ' +
-      'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7. Click a page, its ' +
-      'label above the sheet, or a thumbnail to make it the page that receives ' +
-      'new items. On a phone, the two-page button in the toolbar switches to one ' +
-      'page at a time, larger, and back.</p>' +
-    '<p>Double-click text to edit it, or double-tap it on a touch screen. Paste ' +
-      'or drop images straight onto the page, or drop a <b>.zine</b> file to ' +
-      'open it.</p>' +
+      'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7 &mdash; the strip ' +
+      'of thumbnails is grouped the same way. Click a page, its label above the ' +
+      'sheet, or a thumbnail to make it the page that receives new items. The ' +
+      'arrows beside the sheet, <kbd>Page Up</kbd>/<kbd>Page Down</kbd>, or ' +
+      '<kbd>&larr;</kbd>/<kbd>&rarr;</kbd> with nothing selected turn the page; ' +
+      'on a phone, swipe sideways. A phone shows one page at a time; the page ' +
+      'button in the toolbar switches to the pair and back.</p>' +
+    '<p>Double-click text to edit it, or click it again once it is selected ' +
+      '(tap again on a touch screen). Paste or drop images straight onto the ' +
+      'page, or drop a <b>.zine</b> file to open it. A dashed frame from a ' +
+      'layout is waiting for a photo: click it, or drop one on it.</p>' +
+    '<p>Dragging pulls things onto page edges, centres and the printer margin ' +
+      'line; hold <kbd>Alt</kbd> to place freely. Positions and sizes are in ' +
+      'millimetres; text sizes in points.</p>' +
     '<p><kbd>Del</kbd> removes &nbsp; <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates &nbsp; ' +
       '<kbd>&larr;&uarr;&darr;&rarr;</kbd> nudge, with <kbd>Shift</kbd> &times;10. ' +
       '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
-      'to 15&deg;. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes.</p>' +
+      'to 15&deg;. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, up to 100 steps; layouts, ' +
+      'deleting and opening a file also offer an Undo button right away.</p>' +
 
     '<h3>Across the fold</h3>' +
     '<p>Pick a photo or a line of text and press <b>Both pages</b> to run it ' +
@@ -1537,7 +1835,8 @@ function helpHtml() {
     '<h3>Layouts</h3>' +
     '<p>A layout pours what is already on the page into its slots &mdash; photos ' +
       'and text in the order you added them. Anything left over stays where it ' +
-      'was, and an empty photo slot is left empty. The two wide layouts fill the ' +
+      'was, and a photo slot with no photo to fill it becomes an empty frame, ' +
+      'which never prints. The two wide layouts fill the ' +
       'whole spread rather than the one page.</p>' +
 
     '<h3>QR codes</h3>' +
@@ -1555,17 +1854,17 @@ function helpHtml() {
         'the printer cannot reach it, so cutting it away first just removes the border.</p>' +
         '<p>Then fold the trimmed sheet in half the long way, then in half twice more. ' +
         'Unfold to the long half-fold, cut the slit, then push the ends together and ' +
-        'fold into a booklet. The panel grid was inset by the same amount, so the folds ' +
-        'still land exactly on the panel edges, and the finished zine reads edge to edge.</p>'
+        'fold into a booklet. The page grid was inset by the same amount, so the folds ' +
+        'still land exactly on the page edges, and the finished zine reads edge to edge.</p>'
       : '<p>Print the exported PDF on one side of a single sheet. Fold in half the ' +
         'long way, then in half twice more. Unfold to the long half-fold, cut the ' +
         'slit, then push the ends together and fold into a booklet.</p>' +
         '<p>No trimming is needed: every fold lands on the middle of the paper, which ' +
-        'is exactly where the panel edges are.</p>') +
+        'is exactly where the page edges are.</p>') +
 
     '<h3>Print guides</h3>' +
     '<p>' +
-      (state.guides ? 'Dotted lines mark every panel edge. ' : '') +
+      (state.guides ? 'Dotted lines mark every page edge. ' : '') +
       (state.cut ? 'A solid line marks the slit. ' : '') +
       (state.trimMargin && state.margin > 0 ? 'A solid line near the sheet edge marks the trim. ' : '') +
       (state.guides || state.cut || (state.trimMargin && state.margin > 0)
@@ -1576,7 +1875,8 @@ function helpHtml() {
     '</p>' +
 
     '<h3>Files</h3>' +
-    '<p><b>Save</b> writes an editable, compressed <b>.zine</b> file holding ' +
+    '<p>Your work is kept in this browser automatically, but that is not a ' +
+      'backup &mdash; clearing site data loses it. <b>File &rarr; Save</b> writes an editable, compressed <b>.zine</b> file holding ' +
       'everything, images included. <b>Export PDF</b> renders the sheet at 300 dpi ' +
       'for printing; <b>PNG</b> is the same render as an image. Your work is also ' +
       'kept in this browser between visits.</p>';
@@ -1614,6 +1914,7 @@ const narrow = () => window.matchMedia('(max-width: 860px)').matches;
    screen ignores it outright, so it never affects anything there. */
 function setSingleView(v) {
   state.singleView = !!v;
+  state.viewPref = true;           // chosen, so load() stops applying the default
   if (!findSel()) selId = null;    // the other half's selection may have left view
   paintAll(); save(); syncViewToggle();
 }
@@ -1622,6 +1923,10 @@ function syncViewToggle() {
   const btn = $('#viewToggle');
   if (!btn) return;
   btn.classList.toggle('on', state.singleView);
+  // The icon shows the view in effect: one page, or the pair.
+  btn.querySelector('svg').innerHTML = state.singleView
+    ? '<rect x="4" y="2" width="8" height="12" rx="1"/>'
+    : '<rect x="1" y="2" width="6" height="12" rx="1"/><rect x="9" y="2" width="6" height="12" rx="1"/>';
   btn.setAttribute('aria-pressed', state.singleView ? 'true' : 'false');
   btn.title = state.singleView ? 'Show both pages of the spread' : 'Show one page at a time';
 }
@@ -1636,13 +1941,18 @@ function syncViewToggle() {
    in it (see buildInspector()). Either way this is the one flag both
    screens read, so rebuilding the inspector on every flip keeps a wide
    screen's column in step with it, not just a phone's sheet. */
-let sideOpen = false;
+let sideOpen = false, sideSel = null;
 
-function setSide(open) {
+function setSideState(open) {
   sideOpen = !!open;
+  sideSel = selId;
   document.body.classList.toggle('side-open', sideOpen);
   $('#panelBtn').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
   $('#panelBtn').classList.toggle('on', sideOpen);
+}
+
+function setSide(open) {
+  setSideState(open);
   buildInspector();
 }
 
@@ -1660,9 +1970,34 @@ function setElemDrawer(open) {
   elemDrawerOpen = !!open;
   $('#elemDrawer').classList.toggle('open', elemDrawerOpen);
   $('#elemPeek').setAttribute('aria-expanded', elemDrawerOpen ? 'true' : 'false');
+  keepSelInView();
 }
 
-const elemLabel = el => el.type === 'text' ? 'Text' : el.type === 'qr' ? 'QR code' : 'Image';
+/* The open drawer covers the bottom half of a phone, which is often exactly
+   where the thing being styled is. Slide the sheet up just far enough to
+   show it above the drawer — never so far its top goes under the toolbar —
+   and back down when the drawer shuts. A transform, so nothing re-lays out
+   and the zoom stays put; curShift is what is applied now, so a measurement
+   taken while shifted can be corrected back to the resting position. */
+let curShift = 0;
+function keepSelInView() {
+  const wrap = document.querySelector('.paper-wrap');
+  let shift = 0;
+  const n = selId && nodes.get(selId);
+  if (narrow() && elemDrawerOpen && n) {
+    const r = n.getBoundingClientRect();
+    const top = r.top + curShift, bottom = r.bottom + curShift;
+    const drawerTop = window.innerHeight - $('#elemDrawer').offsetHeight;
+    const barBottom = $('.bar').getBoundingClientRect().bottom;
+    const over = bottom + 12 - drawerTop;
+    if (over > 0) shift = Math.max(0, Math.min(over, top - barBottom - 8));
+  }
+  curShift = Math.round(shift);
+  wrap.style.transform = curShift ? 'translateY(' + (-curShift) + 'px)' : '';
+}
+
+const elemLabel = el => el.type === 'text' ? 'Text' : el.type === 'qr' ? 'QR code'
+  : el.src ? 'Image' : 'Photo frame';
 
 function syncElemDrawer() {
   const el = selected(), drawer = $('#elemDrawer');
@@ -1671,12 +2006,14 @@ function syncElemDrawer() {
   drawer.hidden = !show;
   if (!show) {
     if (wasShown) setElemDrawer(false);     // closed again, ready for next time
+    else if (curShift) keepSelInView();
     return;
   }
   if (!wasShown) setElemDrawer(false);      // just appeared: start closed, not sprung open
   $('#elemPeekLabel').textContent = elemLabel(el);
   $('#elemInspector').innerHTML = inspectorForEl(el, false);
   wireInspector($('#elemInspector'));
+  if (elemDrawerOpen) keepSelInView();      // a different selection, same open drawer
 }
 
 /* ------------------------------------------------------- the page's drawer
@@ -1706,7 +2043,7 @@ function syncPageDrawer() {
   // LABELS is just the panel number for pages 2-7, so naming it again in
   // parens would repeat the number that's already there; cover/back get one
   // because their name isn't their number.
-  $('#pagePeekLabel').textContent = 'Panel ' + (state.active + 1) +
+  $('#pagePeekLabel').textContent = 'Page ' + (state.active + 1) +
     (isNaN(LABELS[state.active]) ? ' (' + LABELS[state.active] + ')' : '');
   $('#pageInspector').innerHTML = pageSectionHtml(false);
   wireInspector($('#pageInspector'));
@@ -1804,13 +2141,13 @@ function marginNote() {
              'paper edge &mdash; fine for a borderless printer, otherwise your printer ' +
              'will crop it for you.';
     }
-    return 'With &ldquo;Trim it off&rdquo; on, the panel grid is inset ' + state.margin +
-      ' mm from every edge of the <b>sheet</b>, so no panel ever reaches into the strip ' +
-      'most printers cannot reach &mdash; nothing here is clipped. Panels are ' +
+    return 'With &ldquo;Trim it off&rdquo; on, the page grid is inset ' + state.margin +
+      ' mm from every edge of the <b>sheet</b>, so no page ever reaches into the strip ' +
+      'most printers cannot reach &mdash; nothing here is clipped. Pages are ' +
       mm(g.panelW) + ' × ' + mm(g.panelH) + ' mm, a touch smaller than a full quarter of ' +
       'the sheet, to leave room for the cut.<br><br>Cut that ' + state.margin + ' mm strip ' +
       'off all four edges of the printed sheet &mdash; the line near the edge shows where ' +
-      '&mdash; <b>before</b> you fold. The folds then land exactly on the panel edges, same ' +
+      '&mdash; <b>before</b> you fold. The folds then land exactly on the page edges, same ' +
       'as always, and the finished zine reads edge to edge.' +
       '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
   }
@@ -1825,16 +2162,16 @@ function marginNote() {
   if (e.l) sides.push('left');
   if (e.r) sides.push('right');
   const safeW = g.panelW / PT - e.l - e.r, safeH = g.panelH / PT - e.t - e.b;
-  const where = 'This panel (' + LABELS[state.active] + ') sits ' +
+  const where = 'This page (' + LABELS[state.active] + ') sits ' +
     (sides.length > 1 ? 'in a corner' : 'along an edge') + ' of the sheet, so its ';
   return 'The outer ' + state.margin + ' mm of the <b>sheet</b> is the strip most ' +
-    'printers cannot reach. Panels keep their full ' + mm(g.panelW) + ' × ' +
-    mm(g.panelH) + ' mm so the folds still land on the panel edges &mdash; instead, ' +
+    'printers cannot reach. Pages keep their full ' + mm(g.panelW) + ' × ' +
+    mm(g.panelH) + ' mm so the folds still land on the page edges &mdash; instead, ' +
     'anything in the striped band is simply lost.<br><br>' +
     (sides.length
       ? where + sides.join(' and ') + ' edge' + (sides.length > 1 ? 's are' : ' is') +
         ' clipped, leaving ' + safeW.toFixed(1) + ' × ' + safeH.toFixed(1) + ' mm to work in.'
-      : 'This panel is in the middle of the sheet, so none of it is clipped.') +
+      : 'This page is in the middle of the sheet, so none of it is clipped.') +
     '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.' +
     ' Turn on &ldquo;Trim it off&rdquo; below if you plan to cut this border away ' +
     'before folding, for an edge-to-edge result.';
@@ -1850,6 +2187,7 @@ function wireInspector(side) {
     const k = node.dataset.k;
     const num = node.hasAttribute('data-num');
     if (node.tagName === 'BUTTON') {
+      if (node.hasAttribute('data-c')) return;          // a colour swatch, wired below
       node.addEventListener('click', () => {
         const el = selected(); if (!el) return;
         pushHistory();
@@ -1862,6 +2200,7 @@ function wireInspector(side) {
       const el = selected(); if (!el) return;
       let v = num ? parseFloat(node.value) : node.value;
       if (num && !isFinite(v)) return;
+      if (node.hasAttribute('data-mm')) v = Math.round(v * PT * 100) / 100;
       if (num && (k === 'w' || k === 'h')) v = Math.max(8, v);
       if (k === 'rot') {
         v = wrapDeg(v);
@@ -1879,9 +2218,24 @@ function wireInspector(side) {
     node.addEventListener('pointerdown', mark);
     node.addEventListener('keydown', mark);
     node.addEventListener('input', () => { mark(); apply(); });
-    node.addEventListener('change', () => { node._h = 0; apply(); });
+    node.addEventListener('change', () => {
+      node._h = 0; apply();
+      if (node.type === 'color') { rememberColour(node.value); buildInspector(); }
+    });
     node.addEventListener('blur', () => { node._h = 0; });
   });
+
+  /* Preset and recent colour swatches go wherever their picker would. */
+  side.querySelectorAll('button[data-c]').forEach(b => b.addEventListener('click', () => {
+    const c = b.dataset.c;
+    if (b.dataset.page === 'bg') {
+      pushHistory(); panel().bg = c || '#ffffff';
+    } else {
+      const el = selected(); if (!el) return;
+      pushHistory(); el[b.dataset.k] = c;
+    }
+    paintAll(); save();
+  }));
 
   /* Spanning is the one property that changes what the fold does to an
      element, so it repaints both halves rather than just restyling. */
@@ -1933,22 +2287,24 @@ function wireInspector(side) {
     node.addEventListener('change', () => { apply(); paintAll(); });
   });
 
-  const bg = side.querySelector('[data-page="bg"]');
+  const bg = side.querySelector('input[data-page="bg"]');
   if (bg) {
     bg.addEventListener('pointerdown', () => pushHistory());
     bg.addEventListener('input', () => { panel().bg = bg.value; paintPage(); paintStrip(); save(); });
+    bg.addEventListener('change', () => { rememberColour(bg.value); buildInspector(); });
   }
 
   side.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const a = b.dataset.act;
     if (a === 'dup') duplicateSel();
     else if (a === 'del') removeSel();
-    else if (a === 'nobg') { const el = selected(); if (el) { pushHistory(); el.bg = ''; paintAll(); save(); } }
+    else if (a === 'edit') { const el = selected(); if (el) { setElemDrawer(false); startEdit(el.id, false); } }
+    else if (a === 'fill') { const el = selected(); if (el) chooseFrame(el.id); }
     else if (a === 'clearPanel') {
-      if (!confirm('Clear everything on this panel?')) return;
       pushHistory();
       doc().panels[state.active] = blankPanel();
       selId = null; paintAll(); save();
+      undoToast('Cleared page ' + (state.active + 1) + '.');
     }
   }));
 }
@@ -1971,7 +2327,8 @@ function syncInspector() {
   const side = narrow() ? $('#elemInspector') : $('#inspector');
   side.querySelectorAll('[data-k]').forEach(node => {
     if (node.tagName === 'BUTTON' || node === document.activeElement) return;
-    const v = el[node.dataset.k];
+    let v = el[node.dataset.k];
+    if (v != null && node.hasAttribute('data-mm')) v = mmv(v);
     if (v != null && node.value !== String(v)) node.value = v;
   });
 }
@@ -2355,9 +2712,6 @@ async function openZine(file) {
   if (data.formatVersion > ZINE_FORMAT) {
     toast('Saved by a newer version — opening as best we can.', 4000);
   }
-  if (!confirm('Open "' + (data.title || 'untitled') +
-               '"? This replaces what is on screen. (Undo will bring it back.)')) return;
-
   stopEdit();
   pushHistory();
   state.title = typeof data.title === 'string' ? data.title : 'untitled zine';
@@ -2372,7 +2726,34 @@ async function openZine(file) {
   $('#title').value = state.title;
   $('#paper').value = state.paper;
   paintAll(); save();
-  toast('Opened ' + file.name, 2500);
+  undoToast('Opened ' + file.name + ' — it replaced what was here.');
+}
+
+/* After an export, the steps from screen to booklet, with the same fold
+   diagram help uses. A dialog rather than help: this is the moment someone
+   actually needs it. "Don't show again" is a per-browser preference. */
+const FOLD_KEY = 'zinemaker.foldGuide';
+
+function foldStepsHtml() {
+  const trim = state.trimMargin && state.margin > 0;
+  const steps = [
+    'Print it on <b>one side</b> of a single sheet, landscape, at <b>100% / actual size</b> &mdash; not &ldquo;fit to page&rdquo;.',
+    trim ? 'Trim ' + state.margin + ' mm off all four edges, along the line printed near the edge.' : null,
+    'Fold it in half the long way, then in half twice more the other way, and open it back out: the creases mark the eight pages.',
+    'Fold it in half with the short ends together. From the folded edge, cut along the middle crease as far as the next crease &mdash; the red line in the picture.',
+    'Open it, push the two ends together so the cut opens into a diamond, and flatten it into a booklet with the cover on top.'
+  ].filter(Boolean);
+  return foldDiagram() + '<ol class="steps">' + steps.map(t => '<li>' + t + '</li>').join('') + '</ol>';
+}
+
+function showFoldGuide(force) {
+  let off = false;
+  try { off = localStorage.getItem(FOLD_KEY) === 'off'; } catch (err) { /* private mode */ }
+  const dlg = $('#foldDialog');
+  if ((off && !force) || !dlg || typeof dlg.showModal !== 'function') return;
+  $('#foldBody').innerHTML = foldStepsHtml();
+  $('#foldNoShow').checked = off;
+  if (!dlg.open) dlg.showModal();
 }
 
 async function exportSheet(kind) {
@@ -2394,6 +2775,7 @@ async function exportSheet(kind) {
       download(pdf, slug(state.title) + '.pdf');
     }
     toast('Saved ' + slug(state.title) + '.' + kind, 2200);
+    showFoldGuide();
   } catch (err) {
     console.error(err);
     toast('Export failed: ' + err.message, 4000);
@@ -2405,14 +2787,30 @@ async function exportSheet(kind) {
 /* ------------------------------------------------------------------- toast */
 
 let toastTimer = null;
-function toast(msg, ms) {
+function toast(msg, ms, action) {
   const t = $('#toast');
   t.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.addEventListener('click', () => { hideToast(); action.run(); });
+    t.appendChild(b);
+  }
+  t.classList.toggle('actionable', !!action);
   t.classList.add('on');
   clearTimeout(toastTimer);
   if (ms) toastTimer = setTimeout(hideToast, ms);
 }
-function hideToast() { $('#toast').classList.remove('on'); }
+function hideToast() { $('#toast').classList.remove('on', 'actionable'); }
+
+/* Big, sweeping changes (a layout, clearing a page, opening a file,
+   deleting something) happen straight away and offer to take it back, rather
+   than asking first. Call it after the change's own pushHistory(). */
+function undoToast(msg) { toast(msg, 6000, { label: 'Undo', run: undo }); }
+function dismissUndoToast() {
+  const t = $('#toast');
+  if (t && t.classList.contains('actionable')) hideToast();
+}
 
 /* -------------------------------------------------------------------- boot */
 
@@ -2427,15 +2825,18 @@ function seed() {
   });
 }
 
-function openExportMenu() {
-  $('#exportMenu').hidden = false;
-  $('#exportMenuBtn').setAttribute('aria-expanded', 'true');
-}
+/* The toolbar's two drop-down menus, export and File: a button with
+   aria-controls naming its menu. Opening one closes the other. */
+const MENUS = [['exportMenuBtn', 'exportMenu'], ['fileBtn', 'fileMenu']];
 
-function closeExportMenu() {
-  $('#exportMenu').hidden = true;
-  $('#exportMenuBtn').setAttribute('aria-expanded', 'false');
+function setMenu(btnId, open) {
+  MENUS.forEach(m => {
+    const want = open && m[0] === btnId;
+    $('#' + m[1]).hidden = !want;
+    $('#' + m[0]).setAttribute('aria-expanded', want ? 'true' : 'false');
+  });
 }
+const closeMenus = () => setMenu(null, false);
 
 async function init() {
   if (!(await load())) seed();
@@ -2448,6 +2849,7 @@ async function init() {
   $('#addImage').addEventListener('click', () => $('#file').click());
   $('#addQr').addEventListener('click', addQr);
   $('#file').addEventListener('change', e => { addImageFiles(e.target.files); e.target.value = ''; });
+  $('#addImage').addEventListener('click', () => { fillTarget = null; }, true);
   $('#newZine').addEventListener('click', newZine);
   $('#openZine').addEventListener('click', () => $('#zineFile').click());
   $('#saveZine').addEventListener('click', saveZine);
@@ -2462,17 +2864,25 @@ async function init() {
     e.target.value = '';
   });
   $('#undo').addEventListener('click', undo);
+  $('#prevPage').addEventListener('click', () => turnPage(-1));
+  $('#foldClose').addEventListener('click', () => $('#foldDialog').close());
+  $('#foldNoShow').addEventListener('change', e => {
+    try { localStorage.setItem(FOLD_KEY, e.target.checked ? 'off' : 'on'); } catch (err) { /* private mode */ }
+  });
+  $('#nextPage').addEventListener('click', () => turnPage(1));
   $('#redo').addEventListener('click', redo);
   $('#exportPdf').addEventListener('click', () => exportSheet('pdf'));
-  $('#exportPng').addEventListener('click', () => { exportSheet('png'); closeExportMenu(); });
-  $('#exportMenuBtn').addEventListener('click', e => {
+  $('#exportPng').addEventListener('click', () => { exportSheet('png'); closeMenus(); });
+  MENUS.forEach(m => $('#' + m[0]).addEventListener('click', e => {
     e.stopPropagation();
-    $('#exportMenu').hidden ? openExportMenu() : closeExportMenu();
-  });
+    setMenu(m[0], $('#' + m[1]).hidden);
+  }));
+  // Picking an item closes its menu (they are plain buttons, so a click on
+  // one also reaches here); so does any click outside one.
   document.addEventListener('click', e => {
-    if (!e.target.closest('.split')) closeExportMenu();
+    if (!e.target.closest('.split') || e.target.closest('.menu button')) closeMenus();
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeExportMenu(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
 
   $('#paper').addEventListener('change', e => {
     state.paper = e.target.value;
@@ -2485,7 +2895,9 @@ async function init() {
     const node = e.target.closest('.el');
     if (node && nodes.has(node.dataset.id)) {
       const el = elById(node.dataset.id);
-      if (el && el.type === 'text') { select(el.id); startEdit(el.id, false); }
+      // The click before this one may already have started editing at the
+      // caret; restarting would throw that caret to the end.
+      if (el && el.type === 'text' && editingId !== el.id) { select(el.id); startEdit(el.id, false); }
     }
   });
   document.addEventListener('keydown', onKey);
@@ -2507,6 +2919,23 @@ async function init() {
   stage.addEventListener('click', e => {
     if (selected() && !e.target.closest('.sheet, .strip, .sheet-labels')) select(null);
   });
+  /* A sideways swipe on a touch screen turns the page. Touch events rather
+     than pointer events, since the browser claims a pan on bare paper and
+     cancels the pointer stream; the strip scrolls sideways itself, and an
+     element under the finger is being dragged, so neither counts. */
+  let swipe = null;
+  stage.addEventListener('touchstart', e => {
+    swipe = e.touches.length === 1 && !e.target.closest('.el, .strip, .elem-drawer')
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() } : null;
+  }, { passive: true });
+  stage.addEventListener('touchend', e => {
+    if (!swipe || !e.changedTouches.length) return;
+    const dx = e.changedTouches[0].clientX - swipe.x, dy = e.changedTouches[0].clientY - swipe.y;
+    const quick = Date.now() - swipe.t < 700;
+    swipe = null;
+    if (quick && Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy)) turnPage(dx < 0 ? 1 : -1);
+  }, { passive: true });
+
   let dragDepth = 0;
   stage.addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth) stage.classList.add('dragging'); });
   stage.addEventListener('dragover', e => e.preventDefault());
@@ -2520,6 +2949,9 @@ async function init() {
     const over = document.elementFromPoint(e.clientX, e.clientY);
     const pd = over && over.closest('.panel[data-pi]');
     if (pd) setActive(+pd.dataset.pi);
+    // Dropped onto an empty photo frame: fill it rather than adding beside it.
+    const hit = over && over.closest('.el.empty');
+    fillTarget = hit ? hit.dataset.id : null;
     addImageFiles(e.dataTransfer.files);
   });
   document.addEventListener('paste', e => {

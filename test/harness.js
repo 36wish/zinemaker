@@ -153,6 +153,9 @@ async function openApp(url) {
         selId = null; editingId = null;
         hist.length = 0; future.length = 0;
         Object.assign(state, ${JSON.stringify(over || {})});
+        const fold = document.getElementById('foldDialog');
+        if (fold && fold.open) fold.close();
+        hideToast();
         if (helpOpen) setHelp(false);
         if (sideOpen) setSide(false);
         paintAll();
