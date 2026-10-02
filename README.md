@@ -36,9 +36,10 @@ since every asset path is relative and nothing is fetched from the network.
 - Dragging snaps to page edges, centres and the printer margin; hold Alt to
   place freely. Positions and sizes are shown in millimetres.
 - Drag anything over the fold and it moves to the page it lands on.
-- Select a photo or a line of text and press **Both pages** to run it across
-  the fold, printing straight through the crease onto the facing page. The
-  two wide layout templates fill a whole spread the same way.
+- Drag or stretch a photo or a line of text so it reaches over the fold and it
+  runs across both pages, printing straight through the crease onto the facing
+  page — or select it and press **Both pages**. **One page** stops it at the
+  fold instead. The two wide layout templates fill a whole spread the same way.
 - Undo/redo with Ctrl/Cmd+Z (Shift to redo), or the toolbar buttons — up to
   100 steps. Layouts, clearing a page, deleting and opening a file also offer
   an Undo button straight away instead of asking first.

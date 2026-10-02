@@ -445,6 +445,127 @@ module.exports = {
       assert.eq(r.active, r.left, 'so the active page does not change either');
     });
 
+    t.check('an element dropped across the fold runs onto both pages', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0], right = spread[1], g = geom();
+        // Wholly on the left-hand page, its right edge 20pt short of the fold.
+        doc().panels[left].els.push({ id: 'drop', type: 'image', src: ${pngDataUrl('#3060c0')},
+          x: Math.round(g.panelW - 120), y: 60, w: 100, h: 60, rot: 0 });
+        setActive(left); paintAll();
+        const node = nodes.get('drop'), box = node.getBoundingClientRect();
+        // 60pt right: over the fold by 40, centre still 10 short of it.
+        ${GESTURE}(node, box.left + 5, box.top + 5, box.left + 5 + 60 * curZoom, box.top + 5);
+        const el = doc().panels[left].els[0];
+        const gn = guestNodes.get('drop');
+        const out = { owner: el && el.id, span: !!(el && el.span),
+                      copyOn: gn ? +gn.parentNode.dataset.pi : null, right: right,
+                      button: document.querySelector('#inspector [data-span="1"]').classList.contains('on') };
+        undo();
+        out.undone = !doc().panels[left].els[0].span;
+        return out;
+      })()`);
+      assert.eq(r.owner, 'drop', 'its centre has not crossed, so it stays on the left-hand page');
+      assert.eq(r.span, true, 'left reaching over the fold, it spans rather than being cut off there');
+      assert.eq(r.copyOn, r.right, 'and the facing page paints the rest of it');
+      assert.eq(r.button, true, 'the inspector shows Both pages straight away');
+      assert.eq(r.undone, true, 'one undo puts the drag and the spanning back together');
+    });
+
+    t.check('stretching an element over the fold runs it onto both pages, even mid-stretch', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0], g = geom();
+        doc().panels[left].els.push({ id: 'grow', type: 'image', src: ${pngDataUrl('#c03060')},
+          x: Math.round(g.panelW - 120), y: 60, w: 100, h: 60, rot: 0 });
+        setActive(left); paintAll(); select('grow');
+        const h = nodes.get('grow').querySelector('.h.se'), box = h.getBoundingClientRect();
+        const x0 = box.left + box.width / 2, y0 = box.top + box.height / 2;
+        const ev = (t, el, x) => el.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y0,
+          button: 0, buttons: t === 'pointerup' ? 0 : 1, bubbles: true }));
+        ev('pointerdown', h, x0);
+        ev('pointermove', window, x0 + 80 * curZoom);
+        const mid = guestNodes.has('grow');
+        ev('pointerup', window, x0 + 80 * curZoom);
+        const el = doc().panels[left].els[0];
+        return { w: el.w, span: !!el.span, mid: mid, after: guestNodes.has('grow') };
+      })()`);
+      assert.eq(r.w, 180, 'the handle stretched it by the pointer delta');
+      assert.eq(r.mid, true, 'it is not chopped at the fold while it is being stretched');
+      assert.eq(r.span, true, 'and once it reaches over, it spans');
+      assert.eq(r.after, true, 'so the facing half stays after letting go');
+    });
+
+    t.check('an element already stopped at the fold stays stopped through a nudge', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const left = visiblePanels()[0], g = geom();
+        // Straddling the fold with One page: clipped there on purpose.
+        doc().panels[left].els.push({ id: 'clip', type: 'text', x: g.panelW - 60, y: 40,
+          w: 100, rot: 0, text: 'cropped', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        setActive(left); paintAll();
+        const node = nodes.get('clip'), box = node.getBoundingClientRect();
+        ${GESTURE}(node, box.left + 5, box.top + 5, box.left + 5 + 4 * curZoom, box.top + 5 + 10 * curZoom);
+        const el = doc().panels[left].els[0];
+        return { moved: Math.round(el.y), span: 'span' in el, copy: guestNodes.has('clip') };
+      })()`);
+      assert.eq(r.moved, 50, 'the nudge happened');
+      assert.eq(r.span, false, 'but a choice of One page made while it straddles is kept');
+      assert.eq(r.copy, false, 'so nothing is painted across the fold');
+    });
+
+    t.check('what counts as reaching over the fold allows for rotation, not a flush edge', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(0);
+        const spread = visiblePanels(), left = spread[0], right = spread[1], g = geom();
+        const box = (x, rot) => ({ id: 'f', type: 'image', src: '', x: x, y: 60, w: 100, h: 100, rot: rot });
+        return {
+          flush: overFold(box(g.panelW - 100, 0), left),
+          over: overFold(box(g.panelW - 98, 0), left),
+          turned: overFold(box(g.panelW - 110, 45), left),   // a corner swings 20pt over
+          rightFlush: overFold(box(0, 0), right),
+          rightOver: overFold(box(-2, 0), right)
+        };
+      })()`);
+      assert.eq(r.flush, false, 'an edge snapped exactly to the fold is not over it');
+      assert.eq(r.over, true, 'two points past it is');
+      assert.eq(r.turned, true, 'a corner rotated over the fold counts');
+      assert.eq(r.rightFlush, false, 'the same holds for a right-hand page');
+      assert.eq(r.rightOver, true, 'reaching backwards');
+    });
+
+    t.check('Both pages on text still being typed in paints the other half at once', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(5);
+        addText();                                 // a new text box starts out being typed in
+        const el = selected();
+        el.x = Math.round(geom().panelW - 60); restyle(el);
+        document.querySelector('#inspector [data-span="1"]').click();
+        const gn = guestNodes.get(el.id);
+        const body = nodes.get(el.id).querySelector('.body');
+        body.textContent = 'still typing';
+        body.dispatchEvent(new Event('input'));
+        const out = { editing: editingId === el.id, copyOn: gn ? +gn.parentNode.dataset.pi : null,
+                      copyText: gn ? gn.querySelector('.body').textContent : null,
+                      sameNode: nodes.get(el.id).querySelector('.body') === body };
+        document.querySelector('#inspector [data-span="0"]').click();
+        out.copyGone = !guestNodes.has(el.id) && !document.querySelector('#sheet .guest');
+        stopEdit();
+        return out;
+      })()`);
+      assert.eq(r.editing, true, 'the caret is left where it was');
+      assert.eq(r.sameNode, true, 'and the box being typed in is not rebuilt under it');
+      assert.eq(r.copyOn, 6, 'the half across the fold appears on the facing page right away');
+      assert.eq(r.copyText, 'still typing', 'and keeps up with the typing');
+      assert.eq(r.copyGone, true, 'One page takes the copy away again, still mid-edit');
+    });
+
     t.check('an element still cannot be dragged off the far side of the spread', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {

@@ -306,11 +306,38 @@ module.exports = {
         const g = geom();
         return { x: doc().panels[1].els[0] && Math.round(doc().panels[1].els[0].x),
                  maxX: Math.round(g.panelW - 20),
+                 span: !!(doc().panels[1].els[0] || {}).span,
                  here: doc().panels[1].els.length, facing: doc().panels[2].els.length };
       })()`);
       assert.eq(r.here, 1, 'it stays on the page being shown');
       assert.eq(r.facing, 0, 'and never lands on the one that is not');
       assert.ok(r.x <= r.maxX, 'it is held inside the single page, got x ' + r.x);
+      assert.eq(r.span, false, 'and bleeding off the edge does not spill it onto a page out of sight');
+    });
+
+    t.check('asking for both pages with one page on screen brings up the spread', async () => {
+      await phone();
+      const r = await page.evaluate(`(() => {
+        setActive(5);
+        setSingleView(true);
+        const g = geom();
+        doc().panels[5].els.push({ id: 'wide', type: 'text', x: g.panelW - 60, y: 40,
+          w: 120, rot: 0, text: 'both sides', font: 0, size: 12, color: '#111',
+          align: 'left', lh: 1.3, ls: 0, bold: false, italic: false, bg: '', pad: 4 });
+        paintAll();
+        select('wide');
+        const before = visiblePanels().length;
+        document.querySelector('#elemInspector [data-span="1"]').click();
+        const gn = guestNodes.get('wide');
+        return { before: before, after: visiblePanels().slice(), span: !!selected().span,
+                 copyOn: gn ? +gn.parentNode.dataset.pi : null,
+                 toggle: document.getElementById('viewToggle').getAttribute('aria-pressed') };
+      })()`);
+      assert.eq(r.before, 1, 'it starts on one page at a time');
+      assert.eq(r.span, true);
+      assert.deepEq(r.after, [5, 6], 'the spread comes up, or the other half has nowhere to show');
+      assert.eq(r.copyOn, 6, 'and the half across the fold is painted on the facing page');
+      assert.eq(r.toggle, 'false', 'the view toggle says which view is now in effect');
     });
 
     t.check('a wide screen always shows the spread, even with single view left on', async () => {

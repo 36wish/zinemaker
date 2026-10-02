@@ -262,7 +262,10 @@ that is not facing, and the two clipped halves meet exactly on the fold.
   facing panel, carrying its offset in `dataset.dx`. **Restyle through `restyle(el)`,
   not `styleNode()`**, or the two halves drift apart mid-drag. Typing is the one
   thing `restyle()` cannot cover: `paintPage()` will not rebuild under a live caret,
-  so `startEdit()`'s `oninput` copies the text across by hand.
+  so `startEdit()`'s `oninput` copies the text across by hand. A copy never holds
+  the caret, though, so under one `paintPage()` still adds and drops the copies
+  themselves (`syncGuests()`) — otherwise "Both pages" on a text box still being
+  typed in, which is every new one, sets the flag and paints nothing.
 
 The fold is not a wall for *any* element, spanning or not:
 
@@ -271,12 +274,19 @@ The fold is not a wall for *any* element, spanning or not:
   **centre** crosses, shifting `x` by one panel width so coordinates stay panel-local
   and the handles stay on the half you can grab. That is also the editor's only
   "move this to the other page" gesture.
-- An element that is not spanning would vanish into the gutter mid-drag, so for the
-  length of the gesture `crossingId` lends it the same second copy a spanning one
-  keeps. Lending it repaints the sheet, which is why **the move drag takes its deltas
-  straight off the pointer** rather than through `pageXY()` — the node the gesture
-  started on is gone by then. Rotate and resize still use `pageXY()`; they do not
-  cross panels.
+- An element that is not spanning would vanish into the gutter mid-gesture, so for
+  the length of a move, resize or rotate `crossingId` lends it the same second copy
+  a spanning one keeps. Lending it repaints the sheet, which is why **the move drag
+  takes its deltas straight off the pointer** rather than through `pageXY()`, and
+  resize looks its node up afresh on every move — the node the gesture started on
+  is gone by then. Rotate measures its centre once, up front.
+- **A gesture that leaves an element reaching over the fold turns `span` on** —
+  dragged across, it stays across, which is what people expect and what the
+  lent copy has just shown them. `overFold()` decides "reaching over", rotation
+  included and ignoring an edge flush against the fold. The exception is an
+  element that already reached over when the gesture began with `span` off: that
+  is "One page" chosen while it straddles, a deliberate clip at the fold, and a
+  nudge keeps it. One undo takes back the gesture and the span together.
 - A template marked `spread` measures x and w across both pages (0 is the left-hand
   page's left edge, 2 the right-hand page's right edge) and everything it places
   spans; on a right-hand page `applyTemplate()` shifts the whole thing back by a
@@ -408,8 +418,11 @@ Measure to the last child's own right edge instead, which has no such floor.
 With one page on screen, the facing page's spanning ink is **still painted** — it
 prints on this page, so it is shown on this page — but it is not this page's to edit:
 `elById()` cannot see it, so a tap on it falls through to a blank-paper click, and
-`spreadRange()` / `rehome()` both fall back to the single panel, so nothing can be
-dragged onto a page that is not on screen.
+`spreadRange()` / `rehome()` / `overFold()` all fall back to the single panel, so
+nothing can be dragged onto a page that is not on screen, nor made to span by
+bleeding off the edge. Pressing "Both pages" in one-page view calls
+`setSingleView(false)` instead, because there the other half has nowhere to show
+and the element would just look cut off at the page edge.
 
 On a phone, `#viewToggle` and `setSingleView()` let `state.singleView` show just
 `state.active` instead of its spread — `visiblePanels()` is the only other place
