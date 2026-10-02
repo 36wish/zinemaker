@@ -227,7 +227,7 @@ module.exports = {
         label: (document.querySelector('#sheet .chop .band-b span') || {}).textContent || '',
         inExport: !!buildSheetNode().querySelector('.chop')
       })`);
-      assert.includes(r.label, 'printer');
+      assert.includes(r.label, 'Print margin');
       assert.eq(r.inExport, false);
     });
 

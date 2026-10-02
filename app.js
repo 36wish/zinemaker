@@ -866,7 +866,7 @@ function chopBands(pi) {
     b.style[(side === 't' || side === 'b') ? 'height' : 'width'] = (e[side] * PT) + 'px';
     // Every page loses its bottom edge, so that band says what the stripes
     // mean; it is editor chrome and never reaches the export.
-    if (side === 'b') b.innerHTML = '<span>printer can&rsquo;t reach this strip</span>';
+    if (side === 'b') b.innerHTML = '<span>Print margin</span>';
     wrap.appendChild(b);
   });
   return wrap.firstChild ? wrap : null;
