@@ -149,6 +149,41 @@ module.exports = {
       assert.eq(r.drawnAsImg, 'IMG');
     });
 
+    t.check('ctrl-dragging or pan mode pans a cropped photo instead of moving it', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(async () => {
+        setActive(0);
+        const c = document.createElement('canvas'); c.width = 400; c.height = 100;
+        c.getContext('2d').fillRect(0, 0, 400, 100);
+        const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+        await addImageFiles([new File([blob], 'wide.png', { type: 'image/png' })]);
+        const el = selected();
+        el.w = 100; el.h = 100; el.x = 20; el.y = 20; el.fit = 'cover'; paintPage();
+        const node = nodes.get(el.id);
+        await new Promise(r => { const i = node.querySelector('img'); i.complete ? r() : (i.onload = r); });
+        const ev = (t, tg, x, y, ctrl) => tg.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y,
+          button: 0, buttons: t === 'pointerup' ? 0 : 1, bubbles: true, ctrlKey: !!ctrl }));
+        const b = node.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
+        ev('pointerdown', node, x, y, true); ev('pointermove', window, x + 30 * curZoom, y, true);
+        ev('pointerup', window, x + 30 * curZoom, y, true);
+        const ctrl = { px: el.px, x: el.x, pos: nodes.get(el.id).querySelector('img').style.objectPosition };
+        setPan(el.id);
+        const n2 = nodes.get(el.id), b2 = n2.getBoundingClientRect();
+        ev('pointerdown', n2, b2.left + 50, b2.top + 50); ev('pointermove', window, b2.left + 50 - 1000, b2.top + 50);
+        ev('pointerup', window, b2.left - 950, b2.top + 50);
+        const mode = { px: el.px, x: el.x };
+        undo();
+        return { ctrl, mode, undone: selected() ? selected().px : panel().els[0].px };
+      })()`);
+      // 400x100 into a 100x100 frame: 300pt cropped, so 30pt right shows 10% more of the left
+      assert.eq(r.ctrl.px, 40);
+      assert.eq(r.ctrl.x, 20, 'the frame itself stays put');
+      assert.eq(r.ctrl.pos, '40% 50%');
+      assert.eq(r.mode.px, 100, 'pan mode needs no modifier, and clamps at the edge');
+      assert.eq(r.mode.x, 20);
+      assert.eq(r.undone, 40, 'one undo per pan');
+    });
+
     t.check('clicking selected text again starts editing; a first click only selects', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {

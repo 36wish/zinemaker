@@ -808,13 +808,15 @@ function styleNode(node, el, dx) {
     if (body.getAttribute('src') !== el.src) body.setAttribute('src', el.src);
     body.className = 'body' + (el.filter && el.filter !== 'none' ? ' f-' + el.filter : '');
     body.style.objectFit = el.fit || 'cover';
+    // Which part of a cropped photo shows: 0 is the left/top edge, 100 the right/bottom.
+    body.style.objectPosition = (el.px == null ? 50 : el.px) + '% ' + (el.py == null ? 50 : el.py) + '%';
     body.style.borderRadius = (el.radius || 0) + 'px';
   }
 }
 
 function makeNode(el, interactive, dx) {
   const d = document.createElement('div');
-  d.className = 'el el-' + el.type;
+  d.className = 'el el-' + el.type + (interactive && el.id === panId ? ' panning' : '');
   d.dataset.id = el.id;
   if (el.type === 'text') {
     const b = document.createElement('div');
@@ -1203,6 +1205,7 @@ function select(id) {
   if (selId === id) return;
   if (editingId && editingId !== id) stopEdit();
   selId = id;
+  if (panId && panId !== id) setPan(null);
   markSelected();
   buildInspector();
 }
@@ -1346,6 +1349,39 @@ function anchorFix(el, dw, dh) {
 /* History is only recorded once the pointer actually moves, so a plain click
    to select something does not fill the undo stack with identical states. */
 let dragging = false;
+
+/* Panning a cropped photo inside its frame: Ctrl/Cmd-drag, or double-click
+   (double-tap on touch) the photo to switch the frame into pan mode, where a
+   plain drag pans until something else is selected. panId is that mode. */
+let panId = null;
+function canPan(el) {
+  return el && el.type === 'image' && el.src && el.fit !== 'contain';
+}
+let panAt = 0;
+function setPan(id) {
+  panId = id; panAt = Date.now();
+  document.querySelectorAll('.el.panning').forEach(n => n.classList.remove('panning'));
+  const n = id && nodes.get(id);
+  if (n) n.classList.add('panning');
+}
+function panDrag(ev, el, node) {
+  const img = node.querySelector('img.body');
+  const nw = img && img.naturalWidth, nh = img && img.naturalHeight;
+  if (!nw || !nh) return false;
+  const k = Math.max(el.w / nw, el.h / nh);
+  const ox = nw * k - el.w, oy = nh * k - el.h;     // how much is cropped off
+  const x0 = ev.clientX, y0 = ev.clientY;
+  const px0 = el.px == null ? 50 : el.px, py0 = el.py == null ? 50 : el.py;
+  const clamp = v => Math.max(0, Math.min(100, Math.round(v * 10) / 10));
+  drag(ev, e => {
+    const d = rotVec((e.clientX - x0) / curZoom, (e.clientY - y0) / curZoom, el.rot || 0);
+    // Dragging the picture right shows more of its left side.
+    if (ox > 0.5) el.px = clamp(px0 - d.x / ox * 100);
+    if (oy > 0.5) el.py = clamp(py0 - d.y / oy * 100);
+    restyle(el);
+  }, null, null);
+  return true;
+}
 function drag(ev, onMove, onEnd, onTap) {
   const snap = snapshot();
   let moved = false;
@@ -1414,8 +1450,18 @@ function onPagePointerDown(ev) {
   const node = nodes.get(id);
   if (!el || !node) return;
 
+  if (!wasSelected || !canPan(el)) setPan(null);
   if (!handle && el.type === 'text' && doubleTapped(id, ev)) {
     startEdit(id, false);
+    return;
+  }
+  if (!handle && canPan(el) && doubleTapped(id, ev)) {
+    setPan(panId === id ? null : id);
+    return;
+  }
+  if (!handle && canPan(el) && (panId === id || ev.ctrlKey || ev.metaKey) &&
+      panDrag(ev, el, node)) {
+    if (panId === id) node.classList.add('panning');
     return;
   }
 
@@ -1792,7 +1838,10 @@ function inspectorForEl(el, withHeading = true) {
       '<div class="col"><label class="f">Fit</label><div class="seg">' +
         '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + ' title="Fill the frame, cropping the edges">Fill frame</button>' +
         '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + ' title="Show the whole photo">Whole photo</button></div></div>' +
-    '</div><div class="row">' +
+    '</div>' + (el.fit === 'contain' ? '' : '<div class="row">' +
+      '<div class="col"><label class="f">Show left &harr; right</label><input type="range" min="0" max="100" step="1" data-k="px" data-num value="' + (el.px == null ? 50 : el.px) + '"></div>' +
+      '<div class="col"><label class="f">Show top &harr; bottom</label><input type="range" min="0" max="100" step="1" data-k="py" data-num value="' + (el.py == null ? 50 : el.py) + '"></div>' +
+    '</div>') + '<div class="row">' +
       '<div class="col"><label class="f">Opacity</label><input type="range" min="0.05" max="1" step="0.05" data-k="opacity" data-num value="' + (el.opacity == null ? 1 : el.opacity) + '"></div>' +
       '<div><label class="f">Corner radius</label><input class="num" type="number" min="0" data-k="radius" data-num value="' + (el.radius || 0) + '"></div>' +
     '</div></div>' + common;
@@ -1947,7 +1996,10 @@ function helpHtml() {
       'button in the toolbar switches to the pair and back.</p>' +
     '<p>Double-click text to edit it, or click it again once it is selected ' +
       '(tap again on a touch screen). Paste or drop images straight onto the ' +
-      'page, or drop a <b>.zine</b> file to open it. A dashed frame from a ' +
+      'page, or drop a <b>.zine</b> file to open it. To choose which part of a ' +
+      'cropped photo shows, Ctrl-drag it (&#8984;-drag on a Mac), or double-click ' +
+      'it (double-tap) and drag; double-click again to go back to moving it. ' +
+      'A dashed frame from a ' +
       'layout is waiting for a photo: click it, or drop one on it.</p>' +
     '<p>Dragging pulls things onto page edges, centres and the printer margin ' +
       'line; hold <kbd>Alt</kbd> to place freely. Positions and sizes are in ' +
@@ -3042,6 +3094,7 @@ async function init() {
       // The click before this one may already have started editing at the
       // caret; restarting would throw that caret to the end.
       if (el && el.type === 'text' && editingId !== el.id) { select(el.id); startEdit(el.id, false); }
+      if (canPan(el) && Date.now() - panAt > 500) { select(el.id); setPan(panId === el.id ? null : el.id); }
     }
   });
   document.addEventListener('keydown', onKey);
