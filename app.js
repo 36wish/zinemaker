@@ -808,6 +808,8 @@ function styleNode(node, el, dx) {
     if (body.getAttribute('src') !== el.src) body.setAttribute('src', el.src);
     body.className = 'body' + (el.filter && el.filter !== 'none' ? ' f-' + el.filter : '');
     body.style.objectFit = el.fit || 'cover';
+    // Which part of a cropped photo shows: 0 is the left/top edge, 100 the right/bottom.
+    body.style.objectPosition = (el.px == null ? 50 : el.px) + '% ' + (el.py == null ? 50 : el.py) + '%';
     body.style.borderRadius = (el.radius || 0) + 'px';
   }
 }
@@ -1792,7 +1794,10 @@ function inspectorForEl(el, withHeading = true) {
       '<div class="col"><label class="f">Fit</label><div class="seg">' +
         '<button data-k="fit" data-v="cover"' + on(el.fit !== 'contain') + ' title="Fill the frame, cropping the edges">Fill frame</button>' +
         '<button data-k="fit" data-v="contain"' + on(el.fit === 'contain') + ' title="Show the whole photo">Whole photo</button></div></div>' +
-    '</div><div class="row">' +
+    '</div>' + (el.fit === 'contain' ? '' : '<div class="row">' +
+      '<div class="col"><label class="f">Show left &harr; right</label><input type="range" min="0" max="100" step="1" data-k="px" data-num value="' + (el.px == null ? 50 : el.px) + '"></div>' +
+      '<div class="col"><label class="f">Show top &harr; bottom</label><input type="range" min="0" max="100" step="1" data-k="py" data-num value="' + (el.py == null ? 50 : el.py) + '"></div>' +
+    '</div>') + '<div class="row">' +
       '<div class="col"><label class="f">Opacity</label><input type="range" min="0.05" max="1" step="0.05" data-k="opacity" data-num value="' + (el.opacity == null ? 1 : el.opacity) + '"></div>' +
       '<div><label class="f">Corner radius</label><input class="num" type="number" min="0" data-k="radius" data-num value="' + (el.radius || 0) + '"></div>' +
     '</div></div>' + common;
