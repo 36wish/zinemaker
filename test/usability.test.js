@@ -402,5 +402,32 @@ module.exports = {
       assert.eq(back, '', 'and the sheet slides back when it shuts');
       await page.unemulate();
     });
+
+    t.check('dragging a thumbnail onto another moves that page there', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        doc().panels.forEach((p, i) => { p.bg = '#00000' + i; });
+        paintAll();
+        const th = i => $('#strip .thumb[data-pi="' + i + '"]').getBoundingClientRect();
+        const a = th(1), b = th(5);
+        const ax = a.x + a.width / 2, ay = a.y + a.height / 2;
+        const bx = b.x + b.width / 2, by = b.y + b.height / 2;
+        const src = $('#strip .thumb[data-pi="1"]');
+        const ev = (t, el, x, y) => el.dispatchEvent(new PointerEvent(t, {
+          clientX: x, clientY: y, button: 0, buttons: t === 'pointerup' ? 0 : 1,
+          bubbles: true, pointerType: 'mouse' }));
+        ev('pointerdown', src, ax, ay);
+        ev('pointermove', window, bx, by);
+        ev('pointerup', window, bx, by);
+        const moved = doc().panels.map(p => p.bg.slice(-1)).join('');
+        const active = state.active;
+        undo();
+        return { moved: moved, active: active,
+                 back: doc().panels.map(p => p.bg.slice(-1)).join('') };
+      })()`);
+      assert.eq(r.moved, '02345167', 'page 2 lands in slot 6, the rest shift up');
+      assert.eq(r.active, 5, 'and the moved page is the one shown');
+      assert.eq(r.back, '01234567', 'one undo puts them back');
+    });
   }
 };

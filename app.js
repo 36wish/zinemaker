@@ -1106,8 +1106,80 @@ function thumbFor(i, g, tz, shown) {
   lbl.className = 'tl';
   lbl.textContent = LABELS[i];
   b.appendChild(tp); b.appendChild(lbl);
-  b.addEventListener('click', () => setActive(i));
+  b.dataset.pi = i;
+  b.addEventListener('click', e => {
+    if (thumbDragged) { thumbDragged = false; e.preventDefault(); return; }
+    setActive(i);
+  });
+  b.addEventListener('pointerdown', e => thumbDrag(e, i));
   return b;
+}
+
+/* Drag a thumbnail onto another to move that page there; the pages between
+   shift along. A mouse drags straight away; touch has to hold first, so a
+   swipe along the strip still scrolls it. */
+let thumbDragged = false;
+function thumbDrag(e, from) {
+  if (e.button > 0) return;
+  const x0 = e.clientX, y0 = e.clientY, touch = e.pointerType === 'touch';
+  let live = false, over = null, held = !touch;
+  const timer = touch ? setTimeout(() => { held = true; begin(); }, 350) : 0;
+  function target(x, y) {
+    const t = document.elementFromPoint(x, y);
+    const b = t && t.closest('#strip .thumb');
+    return b ? +b.dataset.pi : null;
+  }
+  function begin() {
+    live = true;
+    document.body.classList.add('thumb-dragging');
+    const src = $('#strip .thumb[data-pi="' + from + '"]');
+    if (src) src.classList.add('dragging');
+  }
+  function mark(to) {
+    over = to;
+    document.querySelectorAll('#strip .thumb').forEach(b =>
+      b.classList.toggle('drop', to !== null && to !== from && +b.dataset.pi === to));
+  }
+  function move(ev) {
+    if (!live) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      if (!held) return end();            // touch moved before the hold: a scroll
+      begin();
+    }
+    ev.preventDefault();
+    mark(target(ev.clientX, ev.clientY));
+  }
+  function end() {
+    clearTimeout(timer);
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', end);
+    removeEventListener('touchmove', block);
+    document.body.classList.remove('thumb-dragging');
+    document.querySelectorAll('#strip .thumb').forEach(b => b.classList.remove('drop', 'dragging'));
+  }
+  function up() {
+    const to = over;
+    if (live) thumbDragged = true;
+    end();
+    if (live && to !== null && to !== from) movePage(from, to);
+  }
+  function block(ev) { if (live) ev.preventDefault(); }
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', end);
+  addEventListener('touchmove', block, { passive: false });
+}
+
+function movePage(from, to) {
+  stopEdit();
+  pushHistory();
+  const ps = doc().panels;
+  ps.splice(to, 0, ps.splice(from, 1)[0]);
+  selId = null;
+  state.active = to;
+  paintAll(); save();
+  undoToast('Moved page ' + (from + 1) + ' to ' + (to + 1) + '.');
 }
 
 /* Thumbnails redraw every panel, so coalesce bursts (typing, dragging). */
