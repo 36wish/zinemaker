@@ -55,6 +55,44 @@ const FILTERS = [
   { v: 'invert', n: 'Negative' }
 ];
 
+/* Photo masks: a clip-path on the image body, set inline by styleNode(), so it
+   rides into the export with the node itself and needs nothing in #page-css.
+   Polygons are in percent so they stretch with the frame; 'circle' stays
+   round whatever the frame's proportions, 'oval' fills it. */
+const poly = pts => 'polygon(' + pts.map(p => p[0].toFixed(2) + '% ' + p[1].toFixed(2) + '%').join(',') + ')';
+const ring = (n, inner, rot) => {
+  const pts = [];
+  for (let i = 0; i < n * (inner ? 2 : 1); i++) {
+    const a = rot + i * Math.PI / (inner ? n : n / 2), r = inner && i % 2 ? inner : 50;
+    pts.push([50 + r * Math.cos(a), 50 + r * Math.sin(a)]);
+  }
+  return poly(pts);
+};
+const heart = () => {
+  const pts = [];
+  for (let i = 0; i < 64; i++) {
+    const t = i / 64 * 2 * Math.PI;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    pts.push([50 + x * 50 / 16, 42 - y * 50 / 14.5]);
+  }
+  return poly(pts);
+};
+const SHAPES = [
+  { v: 'rect',     n: 'Square',   c: () => '' },
+  { v: 'rounded',  n: 'Rounded',  c: el => 'inset(0 round ' + Math.round(Math.min(el.w, el.h) * 0.15) + 'px)' },
+  { v: 'circle',   n: 'Circle',   c: () => 'circle(closest-side)' },
+  { v: 'oval',     n: 'Oval',     c: () => 'ellipse(50% 50%)' },
+  { v: 'arch',     n: 'Arch',     c: el => 'inset(0 round ' + Math.round(el.w / 2) + 'px ' + Math.round(el.w / 2) + 'px 0 0)' },
+  { v: 'star',     n: 'Star',     c: () => ring(5, 20, -Math.PI / 2) },
+  { v: 'burst',    n: 'Burst',    c: () => ring(12, 40, -Math.PI / 2) },
+  { v: 'heart',    n: 'Heart',    c: heart },
+  { v: 'hexagon',  n: 'Hexagon',  c: () => ring(6, 0, 0) },
+  { v: 'diamond',  n: 'Diamond',  c: () => poly([[50, 0], [100, 50], [50, 100], [0, 50]]) },
+  { v: 'triangle', n: 'Triangle', c: () => poly([[50, 0], [100, 100], [0, 100]]) }
+];
+const shapeClip = el => (SHAPES.find(s => s.v === el.shape) || SHAPES[0]).c(el);
+
 /* ------------------------------------------------------------------ state */
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -811,6 +849,7 @@ function styleNode(node, el, dx) {
     // Which part of a cropped photo shows: 0 is the left/top edge, 100 the right/bottom.
     body.style.objectPosition = (el.px == null ? 50 : el.px) + '% ' + (el.py == null ? 50 : el.py) + '%';
     body.style.borderRadius = (el.radius || 0) + 'px';
+    body.style.clipPath = shapeClip(el);
   }
 }
 
@@ -1833,6 +1872,12 @@ function inspectorForEl(el, withHeading = true) {
         '" data-k="filter" data-v="' + f.v + '" title="' + esc(f.n) + '">' +
         '<img class="' + (f.v === 'none' ? '' : 'f-' + f.v) + '" src="' + esc(el.src || '') + '">' +
         '<span>' + esc(f.n) + '</span></button>').join('') +
+    '</div>' +
+    '<label class="f">Shape</label><div class="shape-grid">' +
+      SHAPES.map(sh => '<button class="swatch' + ((el.shape || 'rect') === sh.v ? ' on' : '') +
+        '" data-k="shape" data-v="' + sh.v + '" title="' + esc(sh.n) + '">' +
+        '<i style="clip-path:' + sh.c({ w: 40, h: 40 }) + '"></i>' +
+        '<span>' + esc(sh.n) + '</span></button>').join('') +
     '</div></div>' +
     '<div class="grp"><div class="row">' +
       '<div class="col"><label class="f">Fit</label><div class="seg">' +

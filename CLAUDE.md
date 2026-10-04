@@ -241,6 +241,15 @@ stacking new ones. `chooseFrame(id)` sets `fillTarget` and opens the file picker
 file path already tolerates `src: ''`: `migrateImages()` gets no bytes from it and
 `saveZine()` keeps it inline.
 
+### Photo masks
+
+`el.shape` picks a mask from `SHAPES` (square, rounded, circle, oval, arch, star,
+burst, heart, hexagon, diamond, triangle). `styleNode()` sets it as an **inline**
+`clip-path` on the image body via `shapeClip(el)`, so it travels into the export
+with the node and needs nothing in `#page-css`. Polygons are in percent so they
+stretch with the frame; `circle` stays round, and `rounded`/`arch` are computed
+in px from `w`/`h`. `print.test.js` measures the mask off the raster.
+
 ### Across the fold
 
 An element with `span` set runs over the gutter onto the facing page. It is still

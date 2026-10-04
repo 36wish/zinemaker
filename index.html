@@ -406,6 +406,9 @@
     display: block; font-size: 9px; color: var(--dim); text-align: center;
     margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .swatch i { display: block; width: 100%; aspect-ratio: 1; background: var(--dim); }
+  .swatch.on i { background: var(--accent2); }
   .swatch:hover span, .swatch.on span { color: var(--fg); }
 
   .fold { width: 100%; height: auto; display: block; margin-bottom: 10px; }

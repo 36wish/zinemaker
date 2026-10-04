@@ -139,6 +139,35 @@ module.exports = {
       assert.eq(r.col3, 16, 'column 3 should show the cover');
     });
 
+    t.check('a photo mask clips the photo in the export, not just on screen', async () => {
+      await page.reset({ margin: 0, cut: false, guides: false });
+      const r = await page.evaluate(`(async () => {
+        state.docs.mini.panels.forEach(p => { p.bg = '#ffffff'; p.els = []; });
+        const shot = shape => { state.docs.mini.panels[0].els = [{ id: 'm', type: 'image',
+          x: 20, y: 40, w: 100, h: 100, rot: 0, src: ${pngDataUrl('#000000')},
+          fit: 'cover', filter: 'none', opacity: 1, radius: 0, shape: shape }]; };
+        const g = geom();
+        const ptToPx = 300 / 72;
+        const probe = async () => {
+          const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, ptToPx);
+          const ctx = cv.getContext('2d');
+          // the cover prints upright at row 1, column 3
+          const at = (x, y) => ctx.getImageData(Math.round((g.offsetX + g.panelW * 3 + x) * ptToPx),
+            Math.round((g.offsetY + g.panelH + y) * ptToPx), 1, 1).data[0];
+          return { corner: at(23, 43), centre: at(70, 90), topTip: at(70, 42) };
+        };
+        shot('rect'); const rect = await probe();
+        shot('circle'); const circle = await probe();
+        shot('star'); const star = await probe();
+        return { rect, circle, star };
+      })()`);
+      assert.eq(r.rect.corner, 0, 'an unmasked photo inks its corner');
+      assert.eq(r.circle.corner, 255, 'a circle mask leaves the corner as paper');
+      assert.eq(r.circle.centre, 0, 'a circle mask still inks the middle');
+      assert.eq(r.star.topTip, 0, "a star's top point is inked");
+      assert.eq(r.star.corner, 255, 'a star leaves the corner as paper');
+    });
+
     t.check('full-bleed artwork is clipped at exactly the margin, all four sides', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(async () => {
