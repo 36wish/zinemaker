@@ -3,7 +3,7 @@
    and it keeps the tables small. Written from the spec rather than pulled from
    a CDN so the app keeps working offline from file://. */
 
-'use strict';
+'use strict'; 
 
 var QR = (function () {
 

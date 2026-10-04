@@ -311,6 +311,9 @@
   .thumb.facing .tl { color: var(--fg); }
   .thumb .tl { font-size: 10px; color: var(--dim); letter-spacing: .04em; }
   .thumb.on .tl { color: var(--fg); }
+  .thumb.dragging { opacity: .4; }
+  .thumb.drop .tp { box-shadow: 0 0 0 2px var(--accent), -6px 0 0 -2px var(--accent); }
+  body.thumb-dragging, body.thumb-dragging .thumb { cursor: grabbing; user-select: none; }
   .thumb .tp > .panel { transform-origin: top left; pointer-events: none; }
 
   /* ---------- inspector ---------- */
