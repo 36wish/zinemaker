@@ -110,7 +110,7 @@ module.exports = {
     });
 
     t.check('trimming before folding keeps panels aligned to the trimmed quarter and half lines', async () => {
-      await page.reset({ margin: 5, trimMargin: true, cut: false, guides: false });
+      await page.reset({ margin: 5, trimMargin: true, cut: false });
       const r = await page.evaluate(`(async () => {
         const greys = [16, 48, 80, 112, 144, 176, 208, 232];
         state.docs.mini.panels.forEach((p, i) => {
@@ -147,7 +147,7 @@ module.exports = {
         state.docs.mini.panels.forEach((p, i) => p.els.push({ id: 'b' + i, type: 'image',
           x: 0, y: 0, w: Math.round(g.panelW), h: Math.round(g.panelH), rot: 0,
           src: black, fit: 'cover', filter: 'none', opacity: 1, radius: 0 }));
-        state.cut = false; state.guides = false;
+        state.cut = false;
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
         const ctx = cv.getContext('2d');
         const perMm = (300 / 72) * (72 / 25.4);
@@ -178,7 +178,7 @@ module.exports = {
       const seams = await page.evaluate(`(async () => {
         const greys = ['#101010','#303030','#505050','#707070','#909090','#a8a8a8','#c0c0c0','#d8d8d8'];
         state.docs.mini.panels.forEach((p, i) => { p.bg = greys[i]; p.els = []; });
-        state.cut = false; state.guides = false;
+        state.cut = false;
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
         const ctx = cv.getContext('2d');
@@ -233,7 +233,7 @@ module.exports = {
        crease; anything approaching 255 is a gap where the halves missed. */
     const straddle = owner => `(async () => {
       const black = ${pngDataUrl('#000000')};
-      state.cut = false; state.guides = false; state.margin = 0; state.trimMargin = false;
+      state.cut = false; state.margin = 0; state.trimMargin = false;
       const g = geom(), W = 40, ptToPx = 300 / 72;
       const spread = SPREADS.find(s => s.indexOf(${owner}) >= 0);
       const partner = spread[0] === ${owner} ? spread[1] : spread[0];
@@ -286,7 +286,7 @@ module.exports = {
     })()`;
 
     const checkStraddle = async (label, owner) => {
-      await page.reset({ margin: 0, cut: false, guides: false });
+      await page.reset({ margin: 0, cut: false });
       const r = await page.evaluate(straddle(owner));
       assert.eq(r.runs.length, 1,
         label + ': ink should cross the fold in one piece, got ' + JSON.stringify(r.runs));
@@ -309,7 +309,7 @@ module.exports = {
       () => checkStraddle('4|5 right page', 4));
 
     t.check('the cut line prints along the middle two columns only', async () => {
-      await page.reset({ margin: 0, cut: true, guides: false });
+      await page.reset({ margin: 0, cut: true });
       const r = await page.evaluate(`(async () => {
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
@@ -338,7 +338,7 @@ module.exports = {
     });
 
     t.check('turning the cut line off leaves the centreline clean', async () => {
-      await page.reset({ margin: 0, cut: false, guides: false });
+      await page.reset({ margin: 0, cut: false });
       const ink = await page.evaluate(`(async () => {
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 150 / 72);
@@ -352,49 +352,8 @@ module.exports = {
       assert.eq(ink, 0, 'found ink on the centreline with the cut line off');
     });
 
-    t.check('panel outlines print on every fold when switched on', async () => {
-      await page.reset({ margin: 0, cut: false, guides: true });
-      const r = await page.evaluate(`(async () => {
-        const g = geom();
-        const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);
-        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-        const perMm = (300 / 72) * (72 / 25.4);
-        // Project ink onto each axis. A dashed line only inks a third of its
-        // length, so sampling one row or column can land in a gap; counting
-        // down the whole axis does not care about the dash phase.
-        const colInk = new Array(cv.width).fill(0);
-        const rowInk = new Array(cv.height).fill(0);
-        for (let y = 0; y < cv.height; y++) {
-          for (let x = 0; x < cv.width; x++) {
-            if (d[((y * cv.width) + x) * 4] < 230) { colInk[x]++; rowInk[y]++; }
-          }
-        }
-        const groups = (counts, floor, per) => {
-          const hits = [];
-          counts.forEach((n, i) => { if (n > floor) hits.push(i); });
-          const out = [];
-          hits.forEach(i => {
-            if (out.length && i - out[out.length - 1].last <= 3) {
-              out[out.length - 1].last = i;
-            } else out.push({ first: i, last: i });
-          });
-          return out.map(b => +(((b.first + b.last) / 2) / per).toFixed(2));
-        };
-        return {
-          verticals: groups(colInk, cv.height * 0.1, perMm),
-          horizontals: groups(rowInk, cv.width * 0.1, perMm)
-        };
-      })()`);
-      assert.eq(r.verticals.length, 3, 'expected three fold lines, saw ' + r.verticals.join(', '));
-      [74.25, 148.5, 222.75].forEach((want, i) => {
-        assert.near(r.verticals[i], want, 0.3, 'vertical fold line ' + i);
-      });
-      assert.eq(r.horizontals.length, 1, 'expected one horizontal fold line, saw ' + r.horizontals.join(', '));
-      assert.near(r.horizontals[0], 105, 0.3, 'horizontal fold line');
-    });
-
     t.check('guides stay off the sheet when both options are off', async () => {
-      await page.reset({ margin: 0, cut: false, guides: false });
+      await page.reset({ margin: 0, cut: false });
       const ink = await page.evaluate(`(async () => {
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 150 / 72);
@@ -407,7 +366,7 @@ module.exports = {
     });
 
     t.check('the trim line is absent unless "Trim it off" is switched on', async () => {
-      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: false });
+      await page.reset({ margin: 5, cut: false, trimMargin: false });
       const ink = await page.evaluate(`(async () => {
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 150 / 72);
@@ -420,7 +379,7 @@ module.exports = {
     });
 
     t.check('the trim line prints a rectangle inset by the margin when switched on', async () => {
-      await page.reset({ margin: 5, cut: false, guides: false, trimMargin: true });
+      await page.reset({ margin: 5, cut: false, trimMargin: true });
       const r = await page.evaluate(`(async () => {
         const g = geom();
         const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 300 / 72);

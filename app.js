@@ -66,7 +66,6 @@ let state = {
   margin: 5,                        // mm of unprintable edge to stay clear of
   trimMargin: false,                // trim that edge off after printing, for an edge-to-edge zine
   cut: true,                        // print a guide along the slit
-  guides: false,                    // print dotted panel outlines
   singleView: true,                 // phone only: one panel on screen instead of the spread
   viewPref: false,                  // set once singleView has been chosen by hand
   docs: { mini: blankDoc(8) }
@@ -198,7 +197,6 @@ async function load() {
       margin: clampMargin(s.margin == null ? 5 : s.margin),
       trimMargin: !!s.trimMargin,
       cut: s.cut !== false,
-      guides: !!s.guides,
       // One page at a time is the phone default — a spread on a portrait
       // screen is half the size — unless someone has picked a view by hand.
       singleView: s.viewPref ? !!s.singleView : true,
@@ -1965,10 +1963,6 @@ function projectSectionHtml() {
 
     '<div class="grp"><h2>Print guides</h2>' +
       '<div class="row">' +
-        '<label class="f" style="margin:0;flex:1">Page outlines</label>' +
-        '<div class="seg"><button data-guides="0"' + on(!state.guides) + '>Off</button>' +
-        '<button data-guides="1"' + on(state.guides) + '>On</button></div></div>' +
-      '<div class="row">' +
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
         '<div class="seg"><button data-cut="0"' + on(!state.cut) + '>Off</button>' +
         '<button data-cut="1"' + on(state.cut) + '>On</button></div></div></div>';
@@ -2056,14 +2050,14 @@ function helpHtml() {
 
     '<h3>Print guides</h3>' +
     '<p>' +
-      (state.guides ? 'Dotted lines mark every page edge. ' : '') +
       (state.cut ? 'A solid line marks the slit. ' : '') +
       (state.trimMargin && state.margin > 0 ? 'A solid line near the sheet edge marks the trim. ' : '') +
-      (state.guides || state.cut || (state.trimMargin && state.margin > 0)
-        ? 'These fall on creases or cuts you are making anyway &mdash; the outlines are ' +
-          'the folds, the middle line is the slit, and the outer one is the trim &mdash; ' +
-          'so a tidy fold and cut hides them.'
-        : 'All are off, so nothing is printed over the artwork; use the diagram above.') +
+      (state.cut || (state.trimMargin && state.margin > 0)
+        ? 'These fall on cuts you are making anyway &mdash; the middle line is the slit ' +
+          'and the outer one is the trim &mdash; so a tidy cut hides them. Page outlines ' +
+          'show on screen only and never print.'
+        : 'Both are off, so nothing is printed over the artwork; use the diagram above. ' +
+          'Page outlines show on screen only and never print.') +
     '</p>' +
 
     '<h3>Files</h3>' +
@@ -2102,7 +2096,7 @@ const narrow = () => window.matchMedia('(max-width: 860px)').matches;
    — there is room, and folding is easier to picture with both in view. On a
    phone the two together can be too small to work in, so state.singleView
    lets it show just the active one instead; visiblePanels() is the only
-   other place that reads it. Persisted like margin/cut/guides, but a wide
+   other place that reads it. Persisted like margin/cut, but a wide
    screen ignores it outright, so it never affects anything there. */
 function setSingleView(v) {
   state.singleView = !!v;
@@ -2453,7 +2447,7 @@ function wireInspector(side) {
     applyTemplate(TEMPLATES[+b.dataset.tpl]);
   }));
 
-  [['data-cut', 'cut'], ['data-guides', 'guides']].forEach(pair => {
+  [['data-cut', 'cut']].forEach(pair => {
     side.querySelectorAll('[' + pair[0] + ']').forEach(b => b.addEventListener('click', () => {
       state[pair[1]] = b.getAttribute(pair[0]) === '1';
       buildInspector(); save();
@@ -2592,22 +2586,13 @@ function buildSheetNode() {
   });
 
   /* Print guides, drawn over the artwork so they read whatever is underneath.
-     All land on creases: the panel outlines are exactly the fold lines, and
-     the scissors go straight through the cut line, so a clean fold and cut
-     leaves neither of them showing on the finished zine. offsetX/Y is zero
+     The scissors go straight through the cut line, so a clean cut leaves it
+     out of the finished zine. Page outlines are on-screen only, never printed. offsetX/Y is zero
      unless trimming before folding, so this is the same math either way. */
   const m = clampMargin(state.margin) * PT;
 
-  if (state.guides || state.cut) {
+  if (state.cut) {
     const svg = guideOverlay(g);
-    if (state.guides) {
-      for (let c = 1; c < 4; c++) {
-        const x = g.offsetX + g.panelW * c;
-        guideStroke(svg, x, g.offsetY, x, g.sheetH - g.offsetY, 1.2, 2.4, '#b4b4b4');
-      }
-      const midY = g.offsetY + g.panelH;
-      guideStroke(svg, g.offsetX, midY, g.sheetW - g.offsetX, midY, 1.2, 2.4, '#b4b4b4');
-    }
     if (state.cut) {
       const midY = g.offsetY + g.panelH;
       guideStroke(svg, g.offsetX + g.panelW, midY, g.offsetX + g.panelW * 3, midY,
@@ -2753,7 +2738,7 @@ function download(blob, name) {
    { "format": "zine", "formatVersion": 2, "app": "zinemaker",
      "saved": <ISO 8601>, "title": string,
      "paper": "a4"|"letter", "margin": <mm>, "trimMargin": bool,
-     "cut": bool, "guides": bool,
+     "cut": bool,
      "assets": [ { "type": <mime>, "bytes": <length> }, ... ],
      "docs": { "mini": { "panels": [ 8 ] } } }
 
@@ -2822,7 +2807,7 @@ async function saveZine() {
     format: 'zine', formatVersion: ZINE_FORMAT, app: 'zinemaker',
     saved: new Date().toISOString(),
     title: state.title, paper: state.paper,
-    margin: state.margin, trimMargin: state.trimMargin, cut: state.cut, guides: state.guides,
+    margin: state.margin, trimMargin: state.trimMargin, cut: state.cut,
     assets: assets.map(a => ({ type: a.type, bytes: a.bytes.length })),
     docs: docs
   };
@@ -2915,7 +2900,6 @@ async function openZine(file) {
   state.margin = clampMargin(data.margin == null ? 5 : data.margin);
   state.trimMargin = !!data.trimMargin;
   state.cut = data.cut !== false;
-  state.guides = !!data.guides;
   state.docs = { mini: fixDoc(data.docs.mini, 8) };
   state.active = 0;
   selId = null;

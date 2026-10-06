@@ -19,7 +19,7 @@ const BUILD_AND_SAVE = `(async () => {
   setActive(0); addText(); stopEdit();
   selected().text = 'cover words';
   state.title = 'binary round trip';
-  state.margin = 7.5; state.cut = false; state.guides = true;
+  state.margin = 7.5; state.cut = false;
 
   let captured = null;
   const real = window.download;
@@ -71,7 +71,7 @@ module.exports = {
         const saved = await ${BUILD_AND_SAVE};
         const plain = JSON.stringify({ format: 'zine', formatVersion: 2, app: 'zinemaker',
           saved: new Date().toISOString(), title: state.title, paper: state.paper,
-          margin: state.margin, cut: state.cut, guides: state.guides,
+          margin: state.margin, cut: state.cut,
           docs: state.docs }, null, 2).length;
         return { binary: saved.bytes.length, json: plain };
       })()`);
@@ -85,16 +85,16 @@ module.exports = {
         const saved = await ${BUILD_AND_SAVE};
         const canon = ${CANON};
         const before = canon(state.docs);
-        const settings = [state.title, state.margin, state.cut, state.guides].join('|');
+        const settings = [state.title, state.margin, state.cut].join('|');
 
         state.docs = { mini: blankDoc(8) };
-        state.title = 'wiped'; state.margin = 0; state.cut = true; state.guides = false;
+        state.title = 'wiped'; state.margin = 0; state.cut = true;
         await openZine(new File([new Uint8Array(saved.bytes)], 'x.zine'));
 
         const imgs = state.docs.mini.panels[2].els.filter(e => e.type === 'image');
         return {
           docsMatch: canon(state.docs) === before,
-          settings: [state.title, state.margin, state.cut, state.guides].join('|') === settings,
+          settings: [state.title, state.margin, state.cut].join('|') === settings,
           titleInput: document.getElementById('title').value,
           images: imgs.length,
           rehydrated: imgs.every(e => /^data:image\\/png;base64,/.test(e.src)),
