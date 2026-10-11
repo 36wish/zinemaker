@@ -879,16 +879,21 @@ function makeNode(el, interactive, dx) {
     img.setAttribute('alt', '');
     d.appendChild(img);
   }
-  if (interactive) {
-    const ui = document.createElement('div');
-    ui.className = 'ui';
-    ui.innerHTML = '<div class="stem"></div><div class="h rot"></div>' +
-                   '<div class="h e"></div>' +
-                   (el.type === 'text' ? '' : '<div class="h se"></div>');
-    d.appendChild(ui);
-  }
+  if (interactive) addHandles(d, el);
   styleNode(d, el, dx);
   return d;
+}
+
+/* The selection handles. The copy lent across the fold gets them too: each
+   panel clips its own contents, so a handle that falls on the facing page is
+   only ever visible on that page's copy. */
+function addHandles(d, el) {
+  const ui = document.createElement('div');
+  ui.className = 'ui';
+  ui.innerHTML = '<div class="stem"></div><div class="h rot"></div>' +
+                 '<div class="h e"></div>' +
+                 (el.type === 'text' ? '' : '<div class="h se"></div>');
+  d.appendChild(ui);
 }
 
 /* The part of a panel the printer cannot reach, drawn over the artwork so you
@@ -982,6 +987,7 @@ function paintPage() {
         if (own) {
           nodes.set(it.el.id, n);
         } else {
+          addHandles(n, it.el);
           n.classList.add('guest');
           n.dataset.dx = it.dx;
           guestNodes.set(it.el.id, n);
@@ -1017,6 +1023,7 @@ function syncGuests(list) {
       if (guestNodes.has(it.el.id)) return;
       const n = makeNode(it.el, false, it.dx);
       n.classList.add('guest');
+      addHandles(n, it.el);
       n.dataset.dx = it.dx;
       guestNodes.set(it.el.id, n);
       pd.insertBefore(n, pd.children[i] || null);
