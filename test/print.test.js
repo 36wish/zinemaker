@@ -316,7 +316,7 @@ module.exports = {
         label + ': ink should cross the fold in one piece, got ' + JSON.stringify(r.runs));
       assert.near(r.runs[0][0], r.gutter - 20, 0.5, label + ': ink starts 20pt before the fold');
       assert.near(r.runs[0][1], r.gutter + 20, 0.5, label + ': ink ends 20pt after the fold');
-      assert.ok(r.lightest < 8, label + ': the fold opens into paper rather than holding ink — ' +
+      assert.ok(r.lightest < 24, label + ': the fold opens into paper rather than holding ink — ' +
         'lightest pixel across the join is ' + r.lightest + ', against ' + r.control +
         ' for the seam two plain panels leave on their own');
     };

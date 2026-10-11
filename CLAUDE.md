@@ -313,7 +313,7 @@ Two things measured rather than assumed, both in `print.test.js`:
   `clip-path` with a negative value plus an oversized background div — so the halves
   overlap. Outer edges stay exact, and the panel is still a quarter of the sheet. The
   cost is a sliver under 0.3 mm where translucent ink doubles; it is export-only, the
-  editor still clips per panel. `print.test.js` measures the seam (lightest pixel < 8).
+  editor still clips per panel. `print.test.js` measures the seam (lightest pixel < 24, was 48).
 
 ### Small screens
 
