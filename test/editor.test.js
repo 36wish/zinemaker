@@ -681,7 +681,7 @@ module.exports = {
         selId = 'i1';
         buildInspector();
         const el = selected();
-        const swatches = [...document.querySelectorAll('#inspector .swatch')];
+        const swatches = [...document.querySelectorAll('#inspector .filter-grid .swatch')];
         const before = swatches.map(s => ({
           v: s.dataset.v, on: s.classList.contains('on'),
           src: s.querySelector('img').getAttribute('src'),
