@@ -2608,6 +2608,8 @@ function guideStroke(svg, x1, y1, x2, y2, dash, gap, colour, width) {
   return line;
 }
 
+const FOLD_BLEED = 0.6;      // px (pt) a panel reaches over the fold when exported
+
 function buildSheetNode() {
   const g = geom();
   const root = document.createElement('div');
@@ -2632,7 +2634,19 @@ function buildSheetNode() {
     pn.className = 'panel';
     pn.style.cssText = 'position:absolute;left:' + (g.offsetX + c.col * g.panelW) + 'px;top:' +
       (g.offsetY + c.row * g.panelH) + 'px;width:' + g.panelW + 'px;height:' + g.panelH +
-      'px;background:' + p.bg + ';transform:rotate(' + c.rot + 'deg)';
+      'px;overflow:visible;background:none;transform:rotate(' + c.rot + 'deg)';
+    /* Two panels that each clip to their own exact edge leave a fractional
+       device pixel on the fold covered by neither fully, and the white sheet
+       shows through as a hairline. So on the fold side only, the clip and the
+       background reach FOLD_BLEED past the edge and the neighbour paints over
+       the sliver. Outer edges stay exact. */
+    const sp = spanPartner(c.i), right = !!sp && SPREADS.find(s => s.indexOf(c.i) >= 0)[0] === c.i;
+    const bl = sp && !right ? FOLD_BLEED : 0, br = sp && right ? FOLD_BLEED : 0;
+    pn.style.clipPath = 'inset(0 ' + (-br) + 'px 0 ' + (-bl) + 'px)';
+    const bg = document.createElement('div');
+    bg.style.cssText = 'position:absolute;top:0;height:100%;left:' + (-bl) + 'px;right:' +
+                       (-br) + 'px;background:' + p.bg;
+    pn.appendChild(bg);
     paintList(c.i).forEach(it => pn.appendChild(makeNode(it.el, false, it.dx)));
     block.appendChild(pn);
   });

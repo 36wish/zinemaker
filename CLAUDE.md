@@ -306,29 +306,14 @@ Two things measured rather than assumed, both in `print.test.js`:
 - A block straddling the fold rasters as **one** unbroken run of ink, full width,
   centred on the crease — checked for both rotations and for an element owned by
   either half, because each has its own sign.
-- The join keeps one lighter pixel on the fold, and **this is known, measured and
-  deliberately left alone**. The two clipped halves do not quite cover the device
-  pixel they share, so whatever is under them shows through: about 48 of 255 through
-  black ink at 300 dpi, one pixel wide (0.085 mm), and it survives the PDF's JPEG at
-  quality 0.94. It is the panel model's, not the span's — two plain adjacent panels
-  of the same colour leave 27 the same way with nothing crossing them, which is what
-  the control in that test measures.
-
-  Before trying to fix it, know what has already been ruled out. It is a real
-  geometric residue, not sequential-compositing loss, so nothing that only reorders
-  or recolours the layers touches it — only ink drawn across that pixel *without* a
-  clip fills it. Laying the element down a third time underneath, across the whole
-  spread, and moving the two panels' backgrounds onto that bed so they stop painting
-  paper into the residue, does work: 48 → 0, measured. It was still not kept, because
-  making those panels transparent is what lets the bed show through, and it then
-  shows through *everywhere*, not just in the residue — so anything translucent or
-  soft-edged renders doubled (an `opacity: 0.5` element composites to 0.75, and a
-  scaled image's soft edge reads about 0.6 pt wider). Trading a hairline for wrong
-  opacity is a bad trade. Do not chase it by rounding panel geometry either — a
-  panel is exactly a quarter of the sheet. The honest fix is to stop clipping per
-  panel: one spread-wide box with a `clip-path` per element, so a spanning element
-  simply has no clip and nothing is ever drawn twice. That is a rewrite of the
-  rendering model, not a patch.
+- The join used to keep one lighter pixel on the fold (about 48 of 255 through black
+  at 300 dpi): two panels each clipped to their exact edge cover the shared device
+  pixel only partially, so white paper showed as a hairline in the PDF. `buildSheetNode()`
+  now makes each panel reach `FOLD_BLEED` (0.6 pt) over the fold side only — an inset
+  `clip-path` with a negative value plus an oversized background div — so the halves
+  overlap. Outer edges stay exact, and the panel is still a quarter of the sheet. The
+  cost is a sliver under 0.3 mm where translucent ink doubles; it is export-only, the
+  editor still clips per panel. `print.test.js` measures the seam (lightest pixel < 8).
 
 ### Small screens
 

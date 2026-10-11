@@ -250,16 +250,11 @@ module.exports = {
        the full width it was given. Half of it means the facing panel never got
        its copy, and two runs mean the halves do not meet at all.
 
-       The join is not asked to be perfect, because within the panel model it
-       cannot be. The two clipped halves do not quite cover the device pixel
-       they share on the fold, so whatever lies under them shows through it:
-       about 48 of 255 through black ink at 300 dpi, one pixel wide, and it
-       survives the PDF's JPEG. The control measures two plain adjacent panels
-       doing the same thing with no spanning element anywhere — it is the
-       panel model's residue, not the span's. See CLAUDE.md for the fix that
-       was tried and why it was not kept. What this asks is only that the fold
-       never open into paper: one pixel of dark grey on the crease is a
-       crease; anything approaching 255 is a gap where the halves missed. */
+       The export lets each panel reach FOLD_BLEED past the fold so the two
+       clipped halves overlap instead of leaving a lighter device pixel
+       between them (it used to be about 48 of 255 through black ink). The
+       control measures two plain adjacent panels with no spanning element
+       anywhere. What this asks is that no paper shows on the crease. */
     const straddle = owner => `(async () => {
       const black = ${pngDataUrl('#000000')};
       state.cut = false; state.margin = 0; state.trimMargin = false;
@@ -321,7 +316,7 @@ module.exports = {
         label + ': ink should cross the fold in one piece, got ' + JSON.stringify(r.runs));
       assert.near(r.runs[0][0], r.gutter - 20, 0.5, label + ': ink starts 20pt before the fold');
       assert.near(r.runs[0][1], r.gutter + 20, 0.5, label + ': ink ends 20pt after the fold');
-      assert.ok(r.lightest < 96, label + ': the fold opens into paper rather than holding ink — ' +
+      assert.ok(r.lightest < 8, label + ': the fold opens into paper rather than holding ink — ' +
         'lightest pixel across the join is ' + r.lightest + ', against ' + r.control +
         ' for the seam two plain panels leave on their own');
     };
