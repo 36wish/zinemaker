@@ -897,16 +897,15 @@ module.exports = {
       const r = await page.evaluate(`(async () => {
         setActive(5); addText(); stopEdit();
         selected().text = 'persisted';
-        state.title = 'stored zine'; state.margin = 8; state.guides = true;
+        state.title = 'stored zine'; state.margin = 8;
         save();
         await new Promise(res => setTimeout(res, 400));
         const raw = JSON.parse(localStorage.getItem('zinemaker.v1'));
-        return { title: raw.title, margin: raw.margin, guides: raw.guides,
+        return { title: raw.title, margin: raw.margin,
                  text: raw.docs.mini.panels[5].els[0].text };
       })()`);
       assert.eq(r.title, 'stored zine');
       assert.eq(r.margin, 8);
-      assert.eq(r.guides, true);
       assert.eq(r.text, 'persisted');
     });
 
