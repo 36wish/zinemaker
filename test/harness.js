@@ -155,6 +155,8 @@ async function openApp(url) {
         Object.assign(state, ${JSON.stringify(over || {})});
         const fold = document.getElementById('foldDialog');
         if (fold && fold.open) fold.close();
+        const align = document.getElementById('alignDialog');
+        if (align && align.open) align.close();
         hideToast();
         if (helpOpen) setHelp(false);
         if (sideOpen) setSide(false);

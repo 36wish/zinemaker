@@ -393,6 +393,42 @@ module.exports = {
       assert.eq(r.staysShut, true, '"Don’t show after every export" sticks');
     });
 
+    t.check('printer alignment adds readings to the saved shift, per browser only', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setPrinterShift(4.25, 1);         // the numbers from a real printer
+        setSide(true);
+        $('#inspector [data-act="align"]').click();
+        const dlg = $('#alignDialog');
+        const out = { open: dlg.open, now: $('#alignNow').textContent };
+        $('#alignX').value = '-0.5'; $('#alignX').dispatchEvent(new Event('input'));
+        $('#alignY').value = '0.5'; $('#alignY').dispatchEvent(new Event('input'));
+        out.note = $('#alignNote').textContent;
+        $('#alignApply').click();
+        out.closed = !dlg.open;
+        out.shift = printerShift();
+        out.status = $('#inspector').textContent;
+        out.inState = JSON.stringify(state).indexOf('hift') >= 0;
+        showAlignDialog();
+        $('#alignReset').click();
+        out.reset = printerShift();
+        out.stored = localStorage.getItem(SHIFT_KEY);
+        out.statusAfter = $('#inspector').textContent;
+        setSide(false);
+        return out;
+      })()`);
+      assert.eq(r.open, true, 'the settings button opens the dialog');
+      assert.includes(r.now, '4.3 mm left and 1 mm up');
+      assert.includes(r.note, '3.8 mm left and 1.5 mm up', 'the note previews the result');
+      assert.eq(r.closed, true);
+      assert.deepEq(r.shift, { x: 3.75, y: 1.5 }, 'a reading is what is left, so it adds on');
+      assert.includes(r.status, 'Exports move everything 3.8 mm left and 1.5 mm up');
+      assert.eq(r.inState, false, 'the shift is the printer’s, never the document’s');
+      assert.deepEq(r.reset, { x: 0, y: 0 });
+      assert.eq(r.stored, null, 'reset forgets it');
+      assert.includes(r.statusAfter, 'Not adjusted');
+    });
+
     t.check('a phone starts on one page unless a view was picked by hand', async () => {
       await page.reset();
       const r = await page.evaluate(`(async () => {
