@@ -524,8 +524,7 @@ dialog's four edge fields go through `edgeNeeds()`, which first turns each
 reading into a distance from the *paper's* edge using the crease readings (the
 image moving right widens the left strip and narrows the right), then sets
 `state.margin` on Apply to the worst edge rounded up to 0.5 mm plus 0.5 mm for
-feed wobble. Empty edge fields leave the margin alone. The dashed margin frame
-is drawn before the gauges so their bars paint over it.
+feed wobble. Empty edge fields leave the margin alone.
 
 ### The `.zine` file
 

@@ -3176,13 +3176,6 @@ function buildCalibrationNode() {
   line(bx - 3 * PT, cy + bh / 2, bx + 3 * PT, cy + bh / 2, 0.6);
   text(bx - 4, cy, '150 mm', 6.5, 'middle', { transform: 'rotate(-90 ' + (bx - 4) + ' ' + cy + ')' });
 
-  // The printer margin, so a missing stretch of it shows which edge is short.
-  // Drawn first, so the edge gauges' bars paint over it.
-  if (m > 0) {
-    add('rect', { x: m, y: m, width: W - 2 * m, height: H - 2 * m, fill: 'none',
-                  stroke: soft, 'stroke-width': 0.5, 'stroke-dasharray': '3 2' });
-  }
-
   /* Edge gauges: a black bar printed right off each edge of the paper, with
      a ruler beside it measured from that edge. The printer leaves blank
      whatever strip it cannot reach, so the mark where the black begins is
@@ -3219,10 +3212,6 @@ function buildCalibrationNode() {
   say('4. Read where each crease crosses its scale and type the numbers into Zinemaker.');
   say('5. On each edge, read the mark where the black bar begins (each tick is half a mm) and type those in too.');
   say('If the two scales of a pair read differently, the paper fed in crooked: use the average.', 6.5);
-  if (m > 0) {
-    say('The dashed frame is your ' + state.margin + ' mm printer margin. If part of it is missing, ' +
-        'that edge needs a wider margin.', 6.5);
-  }
   if (s.x || s.y) {
     say('Already corrected: everything moves ' + describeMove(-s.x, -s.y) +
         '. A sheet that needs nothing more reads 0 on every scale.', 6.5);
