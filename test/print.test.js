@@ -583,6 +583,57 @@ module.exports = {
       assert.eq(r.plusLeft, true, '"+" (too far right) is on the left, where the crease falls');
     });
 
+    t.check('the test sheet runs a bar off each edge, ruled from that edge', async () => {
+      await page.reset({ margin: 5 });
+      const r = await page.evaluate(`(async () => {
+        const g = geom(), s = 300 / 72, mmPx = s * PT;
+        // Where each bar's black begins and ends, in mm in from its edge,
+        // walking along the bar's middle.
+        const reach = async () => {
+          // the export's own movement, followed across each bar (not along it)
+          const sh = printerShift(), mx = -sh.x * PT, my = -sh.y * PT;
+          const node = buildCalibrationNode();
+          const cv = await rasterize(node, g.sheetW, g.sheetH, s);
+          const ctx = cv.getContext('2d');
+          const run = (gauge) => {
+            // The raster leaves the outermost pixel or two pale on some edges
+            // (rasterize() fitting the SVG to whole pixels), so start 4 px in.
+            let from = null, to = null;
+            for (let d = 4; d < 20 * mmPx; d++) {
+              const p = gauge.at(d / s, -GAUGE.bar * PT / 2);
+              const x = Math.min(cv.width - 1, Math.round((p[0] + (gauge.across ? mx : 0)) * s));
+              const y = Math.min(cv.height - 1, Math.round((p[1] + (gauge.across ? 0 : my)) * s));
+              const dark = ctx.getImageData(x, y, 1, 1).data[0] < 64;
+              if (dark && from === null) from = d;
+              if (!dark && from !== null) { to = d; break; }
+            }
+            // Black from the first pixel looked at means black from the edge.
+            return [from === 4 ? 0 : from / mmPx, to / mmPx].map(v => Math.round(v * 10) / 10);
+          };
+          const out = {};
+          EDGE_GAUGES(g.sheetW, g.sheetH).forEach(gg => { out[gg.edge] = run(gg); });
+          const four = [...node.querySelectorAll('text')].find(t => t.textContent === '4');
+          out.four = +four.getAttribute('x') / PT;
+          return out;
+        };
+        const plain = await reach();
+        setPrinterShift(2, -1);      // too far right and too high: moves left and down
+        const moved = await reach();
+        setPrinterShift(0, 0);
+        return { plain: plain, moved: moved };
+      })()`);
+      const near = (got, want, msg) => {
+        assert.near(got[0], want[0], 0.2, msg + ' (black begins)');
+        assert.near(got[1], want[1], 0.2, msg + ' (black ends)');
+      };
+      ['l', 'r', 't', 'b'].forEach(k => near(r.plain[k], [0, 11], k + ' bar runs off its edge'));
+      assert.near(r.plain.four, 4, 0.05, 'the left ruler counts from the left edge');
+      near(r.moved.l, [0, 9], 'moved 2 mm left, the left bar runs 2 mm off the PDF');
+      near(r.moved.r, [2, 13], 'and the right one starts 2 mm in');
+      near(r.moved.t, [1, 12], 'moved 1 mm down, the top bar starts 1 mm in');
+      near(r.moved.b, [0, 10], 'and the bottom one runs 1 mm off');
+    });
+
     t.check('US Letter keeps the same quarter-and-half relationship', async () => {
       await page.reset({ paper: 'letter' });
       const g = await page.evaluate('(() => { const g = geom(); return ' +

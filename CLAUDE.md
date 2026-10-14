@@ -517,6 +517,16 @@ the check. Its labels are the negated tick offset, so the left half reads "+"
 right. `print.test.js` measures both the shifted rim and where the scale's
 zero lands.
 
+The same sheet measures the margin the printer needs: `EDGE_GAUGES` puts a
+black bar running off each edge with a ruler (mm from that edge) beside it,
+and where the black begins on paper is how close that edge can print. The
+dialog's four edge fields go through `edgeNeeds()`, which first turns each
+reading into a distance from the *paper's* edge using the crease readings (the
+image moving right widens the left strip and narrows the right), then sets
+`state.margin` on Apply to the worst edge rounded up to 0.5 mm plus 0.5 mm for
+feed wobble. Empty edge fields leave the margin alone. The dashed margin frame
+is drawn before the gauges so their bars paint over it.
+
 ### The `.zine` file
 
 Binary container, format version 2, written by `saveZine()` and read by `readZine()`:

@@ -2094,7 +2094,9 @@ function helpHtml() {
       'of the paper, so a shifted print folds off its page edges. <b>Line up with your ' +
       'printer</b> prints a test sheet you fold in half each way; the creases read ' +
       'straight off the scales how far it is out, and every export from then on moves ' +
-      'the other way by that much. It is kept in this browser for this printer, not ' +
+      'the other way by that much. A black bar runs off each edge of the same sheet: ' +
+      'where the black actually begins is how close that printer can print, and the ' +
+      'printer margin is set from the worst edge. It is kept in this browser for this printer, not ' +
       'in the zine, so a .zine you send someone else is not shifted for their printer.</p>' +
 
     '<h3>Folding</h3>' + foldDiagram() +
@@ -3084,6 +3086,22 @@ function describeMove(x, y) {
    left half reads "+", meaning "prints too far right". Same downwards. */
 const SCALE_HALF = 15;                // mm either side of the middle
 
+/* The edge gauges, in mm: a bar GAUGE.bar wide running GAUGE.len in from
+   the edge, its ruler on the inner side. at(d, side) maps a distance d in
+   from that edge and an offset to the side of the bar (positive towards the
+   ruler) onto the sheet. The left and right bars sit below the middle, the
+   top and bottom ones to the right of it, clear of the scales and the notes. */
+const GAUGE = { bar: 3, len: 11 };
+const EDGE_GAUGES = (W, H) => {
+  const y0 = H / 2 + 30 * PT, x0 = W * 0.75;
+  return [
+    { edge: 'l', name: 'LEFT EDGE', anchor: 'start', at: (d, s) => [d, y0 + s] },
+    { edge: 'r', name: 'RIGHT EDGE', anchor: 'end', at: (d, s) => [W - d, y0 + s] },
+    { edge: 't', name: 'TOP EDGE', anchor: 'middle', across: true, at: (d, s) => [x0 + s, d] },
+    { edge: 'b', name: 'BOTTOM EDGE', anchor: 'middle', across: true, at: (d, s) => [x0 + s, H - d] }
+  ];
+};
+
 function buildCalibrationNode() {
   const g = geom(), W = g.sheetW, H = g.sheetH, cx = W / 2, cy = H / 2;
   const s = printerShift(), m = clampMargin(state.margin) * PT;
@@ -3152,17 +3170,40 @@ function buildCalibrationNode() {
   line(cx + bw / 2, by - 3 * PT, cx + bw / 2, by + 3 * PT, 0.6);
   text(cx, by - 4, '200 mm — if it measures anything else, the print dialog is ' +
        'scaling the page: set it to 100% / actual size', 6.5, 'middle');
-  const bh = 150 * PT, bx = W - 24 * PT;
+  const bh = 150 * PT, bx = W - 40 * PT;
   line(bx, cy - bh / 2, bx, cy + bh / 2, 0.6);
   line(bx - 3 * PT, cy - bh / 2, bx + 3 * PT, cy - bh / 2, 0.6);
   line(bx - 3 * PT, cy + bh / 2, bx + 3 * PT, cy + bh / 2, 0.6);
   text(bx - 4, cy, '150 mm', 6.5, 'middle', { transform: 'rotate(-90 ' + (bx - 4) + ' ' + cy + ')' });
 
   // The printer margin, so a missing stretch of it shows which edge is short.
+  // Drawn first, so the edge gauges' bars paint over it.
   if (m > 0) {
     add('rect', { x: m, y: m, width: W - 2 * m, height: H - 2 * m, fill: 'none',
                   stroke: soft, 'stroke-width': 0.5, 'stroke-dasharray': '3 2' });
   }
+
+  /* Edge gauges: a black bar printed right off each edge of the paper, with
+     a ruler beside it measured from that edge. The printer leaves blank
+     whatever strip it cannot reach, so the mark where the black begins is
+     how much margin that edge needs. EDGE_GAUGES says where each one is. */
+  EDGE_GAUGES(W, H).forEach(gauge => {
+    const at = (d, side) => gauge.at(d * PT, side * PT);
+    const a = at(0, -GAUGE.bar), b = at(GAUGE.len, 0);
+    add('rect', { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]),
+                  width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]), fill: ink });
+    for (let k = 1; k <= 2 * GAUGE.len; k++) {
+      const p = at(k / 2, 0), q = at(k / 2, k % 4 === 0 ? 2.6 : k % 2 === 0 ? 1.8 : 1.1);
+      line(p[0], p[1], q[0], q[1], 0.35);
+      if (k % 4 === 0) {
+        const t = at(k / 2, 3.4);
+        if (gauge.across) text(t[0], t[1] + 2, String(k / 2), 5.5, 'start');
+        else text(t[0], t[1] + 4.2, String(k / 2), 5.5, 'middle');
+      }
+    }
+    const c = at(GAUGE.len + 2, -GAUGE.bar / 2);
+    text(c[0], c[1] + 2.2, gauge.name, 6, gauge.anchor, { 'font-weight': 'bold' });
+  });
 
   const left = Math.max(m, 0) + 12 * PT;
   let ty = Math.max(m, 0) + 14 * PT;
@@ -3176,6 +3217,7 @@ function buildCalibrationNode() {
   say('2. Fold it in half left edge to right edge, corners exactly together. Crease, unfold.');
   say('3. Fold it in half top edge to bottom edge. Crease, unfold.');
   say('4. Read where each crease crosses its scale and type the numbers into Zinemaker.');
+  say('5. On each edge, read the mark where the black bar begins (each tick is half a mm) and type those in too.');
   say('If the two scales of a pair read differently, the paper fed in crooked: use the average.', 6.5);
   if (m > 0) {
     say('The dashed frame is your ' + state.margin + ' mm printer margin. If part of it is missing, ' +
@@ -3214,8 +3256,8 @@ async function exportCalibration() {
 function showAlignDialog() {
   const dlg = $('#alignDialog');
   if (!dlg || typeof dlg.showModal !== 'function') return;
-  $('#alignX').value = '';
-  $('#alignY').value = '';
+  ['#alignX', '#alignY', '#alignEdge-l', '#alignEdge-t', '#alignEdge-r', '#alignEdge-b']
+    .forEach(id => { $(id).value = ''; });
   syncAlignNote();
   if (!dlg.open) dlg.showModal();
 }
@@ -3224,6 +3266,29 @@ function alignReadings() {
   const v = id => { const n = parseFloat($(id).value); return isFinite(n) ? n : 0; };
   return { x: v('#alignX'), y: v('#alignY') };
 }
+
+/* What the edge readings ask of the margin, or null with none typed in. A
+   gauge is measured from the edge of the PDF, which the printer moved by
+   what the creases read (x, y), so each is turned into a distance from the
+   edge of the *paper* first: the image moving right widens the left strip and
+   narrows the right. Once the new correction lines the two up, the margin
+   has to cover the worst edge. Rounded up to a half mm, plus half a mm more,
+   since the paper never feeds twice to the same spot. */
+function edgeNeeds(r) {
+  const read = { l: r.x, r: -r.x, t: r.y, b: -r.y };
+  let worst = null;
+  ['l', 't', 'r', 'b'].forEach(k => {
+    const n = parseFloat($('#alignEdge-' + k).value);
+    if (!isFinite(n)) return;
+    const need = Math.max(0, n + read[k]);
+    if (!worst || need > worst.need) worst = { edge: k, need: need };
+  });
+  if (!worst) return null;
+  worst.margin = clampMargin(Math.ceil(worst.need * 2 - 1e-9) / 2 + 0.5);
+  return worst;
+}
+
+const EDGE_WORDS = { l: 'left', r: 'right', t: 'top', b: 'bottom' };
 
 /* One line for the settings column: what the export does about this printer. */
 function alignStatus() {
@@ -3238,20 +3303,27 @@ function syncAlignNote() {
   $('#alignNow').textContent = now
     ? 'Right now, exports move everything ' + now + '.'
     : 'Right now, exports are not adjusted.';
-  $('#alignNote').textContent = (r.x || r.y)
+  const e = edgeNeeds(r);
+  $('#alignNote').textContent = ((r.x || r.y)
     ? (next ? 'After this, exports will move everything ' + next + '.'
             : 'After this, exports will not be adjusted.')
-    : '';
+    : '') + (e
+    ? ' The ' + EDGE_WORDS[e.edge] + ' edge needs the most, ' + fmtMm(e.need) +
+      ' mm, so the printer margin will be ' + e.margin + ' mm (it is ' + state.margin + ' mm now).'
+    : '');
   $('#alignReset').hidden = !now;
 }
 
 function applyAlign() {
   const s = printerShift(), r = alignReadings();
   const n = setPrinterShift(s.x + r.x, s.y + r.y);
+  const e = edgeNeeds(r);
   $('#alignDialog').close();
-  buildInspector();
+  if (e) { state.margin = e.margin; save(); }
+  paintAll();
   const d = describeMove(-n.x, -n.y);
-  toast(d ? 'Exports now move everything ' + d + '.' : 'Exports are no longer adjusted.', 3200);
+  toast((d ? 'Exports now move everything ' + d + '.' : 'Exports are no longer adjusted.') +
+        (e ? ' Printer margin ' + e.margin + ' mm.' : ''), 3600);
 }
 
 async function exportSheet(kind) {
@@ -3363,8 +3435,7 @@ async function init() {
     try { localStorage.setItem(FOLD_KEY, e.target.checked ? 'off' : 'on'); } catch (err) { /* private mode */ }
   });
   $('#alignSheet').addEventListener('click', exportCalibration);
-  $('#alignX').addEventListener('input', syncAlignNote);
-  $('#alignY').addEventListener('input', syncAlignNote);
+  $('#alignDialog').querySelectorAll('input').forEach(i => i.addEventListener('input', syncAlignNote));
   $('#alignCancel').addEventListener('click', () => $('#alignDialog').close());
   $('#alignApply').addEventListener('click', applyAlign);
   $('#alignReset').addEventListener('click', () => {

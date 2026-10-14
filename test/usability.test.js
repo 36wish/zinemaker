@@ -429,6 +429,32 @@ module.exports = {
       assert.includes(r.statusAfter, 'Not adjusted');
     });
 
+    t.check('the edge readings set the printer margin from the worst edge', async () => {
+      await page.reset({ margin: 5 });
+      const r = await page.evaluate(`(() => {
+        const set = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); };
+        showAlignDialog();
+        set('#alignX', '1'); set('#alignY', '0.5');
+        // Read off the PDF's edges, which the printer moved 1 right, 0.5 down:
+        // on paper that is left 3, right 2, top 1.5, bottom 3.5.
+        set('#alignEdge-l', '2'); set('#alignEdge-r', '3');
+        set('#alignEdge-t', '1'); set('#alignEdge-b', '4');
+        const note = $('#alignNote').textContent;
+        $('#alignApply').click();
+        const after = { margin: state.margin, shift: printerShift() };
+        showAlignDialog();
+        set('#alignX', '0.5');
+        $('#alignApply').click();
+        const blank = state.margin;
+        setPrinterShift(0, 0);
+        return { note: note, after: after, blank: blank };
+      })()`);
+      assert.includes(r.note, 'bottom edge needs the most, 3.5 mm');
+      assert.eq(r.after.margin, 4, 'rounded up to the half mm, and half a mm to spare');
+      assert.deepEq(r.after.shift, { x: 1, y: 0.5 });
+      assert.eq(r.blank, 4, 'with the edges left empty the margin stays put');
+    });
+
     t.check('a phone starts on one page unless a view was picked by hand', async () => {
       await page.reset();
       const r = await page.evaluate(`(async () => {
