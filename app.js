@@ -2994,8 +2994,17 @@ const FOLD_ICONS = {
   slit: '<rect x="4" y="12" width="56" height="40"/>' +
     '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h14M46 32h14"/>' +
     '<path class="ink" d="M18 32h28"/>',
-  booklet: '<path d="M22 14h26v38H22z"/><path d="M18 18v38h26"/><path d="M14 22v38h26"/>' +
-    '<path d="M27 23h16M27 28h11"/>'
+  /* Looking down on the half-folded strip: the ends pushed inward and the
+     slit between them opened into a diamond. */
+  diamond: '<path d="M4 32h12l16-18 16 18h12"/><path d="M16 32l16 18 16-18"/>' +
+    '<path class="dash" d="M32 14v36"/>' +
+    '<path class="ink" d="M4 44h8M9 41l3 3-3 3M60 44h-8M55 41l-3 3 3 3"/>',
+  // A closed booklet, page-shaped, with its spine on the left and the
+  // pages' edges showing behind the cover.
+  booklet: '<path d="M46 13h3v41H22v-3"/><path d="M49 16h3v41H25v-3"/>' +
+    '<rect x="18" y="10" width="28" height="41"/><path class="spine" d="M18 10v41"/>' +
+    '<path class="thin" d="M22 10v41"/>' +
+    '<rect class="thin" x="26" y="17" width="15" height="12"/><path d="M26 35h15M26 40h9"/>'
 };
 
 function foldStepsHtml() {
@@ -3020,9 +3029,10 @@ function foldStepsHtml() {
       body: '<p>Fold it in half with the short ends together. From the folded edge, ' +
         'cut along the middle crease as far as the next one &mdash; the red line ' +
         'in the diagram' + (state.cut ? ', and the line printed on the sheet' : '') + '.</p>' },
-    { icon: 'booklet', title: 'Fold the booklet', sub: 'Fold &amp; finish',
-      body: '<p>Open it out and push the two ends together, so the slit opens into a diamond. ' +
-        'Flatten it into a booklet with the cover on top.</p>' }
+    { icon: 'diamond', title: 'Open the diamond', sub: 'Push',
+      body: '<p>Open it out and push the two ends together, so the slit opens into a diamond.</p>' },
+    { icon: 'booklet', title: 'Flatten the booklet', sub: 'Finish',
+      body: '<p>Flatten it into a booklet with the cover on top.</p>' }
   ].filter(Boolean);
   return '<figure class="fold-plate">' + foldDiagram() + '</figure>' +
     '<ol class="steps">' + steps.map((st, i) =>
