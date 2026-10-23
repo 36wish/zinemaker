@@ -2980,16 +2980,61 @@ async function openZine(file) {
    actually needs it. "Don't show again" is a per-browser preference. */
 const FOLD_KEY = 'zinemaker.foldGuide';
 
+/* Line drawings for the guide's left column, one per step: 64 units square,
+   stroked in currentColor so the dialog's ink colour decides them. */
+const FOLD_ICONS = {
+  print: '<path d="M8 16h38l10 10v22H8z"/><path d="M46 16v10h10"/>' +
+    '<path d="M15 27h22M15 33h34M15 39h34"/>',
+  trim: '<rect x="6" y="14" width="52" height="36"/>' +
+    '<rect class="dash" x="12" y="20" width="40" height="24"/>' +
+    '<path d="M6 8v4M58 8v4M6 52v4M58 52v4"/>',
+  crease: '<rect x="6" y="16" width="52" height="32"/>' +
+    '<path class="dash" d="M19 16v32M32 16v32M45 16v32M6 32h52"/>',
+  slit: '<path d="M22 12h28v36H22"/><path d="M18 16v36h28v-4"/>' +
+    '<path class="dash" d="M36 12v36M36 30h14"/><path class="ink" d="M22 30h14"/>',
+  booklet: '<path d="M22 14h26v38H22z"/><path d="M18 18v38h26"/><path d="M14 22v38h26"/>' +
+    '<path d="M27 23h16M27 28h11"/>'
+};
+
 function foldStepsHtml() {
   const trim = state.trimMargin && state.margin > 0;
+  const g = geom(), paper = PAPER[state.paper].label;
+  const mm = v => Math.round(v / PT);
+  const chips = list => '<p class="chips">' +
+    list.map(t => '<span class="chip">' + t + '</span>').join('') + '</p>';
   const steps = [
-    'Print it on <b>one side</b> of a single sheet, landscape, at <b>100% / actual size</b> &mdash; not &ldquo;fit to page&rdquo;.',
-    trim ? 'Trim ' + state.margin + ' mm off all four edges, along the line printed near the edge.' : null,
-    'Fold it in half the long way, then in half twice more the other way, and open it back out: the creases mark the eight pages.',
-    'Fold it in half with the short ends together. From the folded edge, cut along the middle crease as far as the next crease &mdash; the red line in the picture.',
-    'Open it, push the two ends together so the cut opens into a diamond, and flatten it into a booklet with the cover on top.'
+    { icon: 'print', title: 'Print', sub: 'Print settings',
+      body: '<p>Print the PDF on one side of a single sheet of ' + paper + '. ' +
+        'In the print dialog choose</p>' +
+        chips(['Actual size &middot; 100%', 'Landscape', 'One-sided']) +
+        '<p>Not &ldquo;fit to page&rdquo; &mdash; that shrinks the artwork and the folds miss it.</p>' },
+    trim ? { icon: 'trim', title: 'Trim', sub: 'Trim the border',
+      body: '<p>Cut ' + state.margin + ' mm off all four edges with a paper cutter, ' +
+        'along the line printed near the edge. That strip was blank anyway.</p>' } : null,
+    { icon: 'crease', title: 'Crease', sub: 'Fold &amp; unfold',
+      body: '<p>Fold the sheet in half the long way, then in half twice more the other way. ' +
+        'Open it back out: the creases mark the eight pages.</p>' },
+    { icon: 'slit', title: 'Cut the slit', sub: 'Cut',
+      body: '<p>Fold it in half with the short ends together. From the folded edge, ' +
+        'cut along the middle crease as far as the next one &mdash; the red line ' +
+        'in the diagram' + (state.cut ? ', and the line printed on the sheet' : '') + '.</p>' },
+    { icon: 'booklet', title: 'Fold the booklet', sub: 'Fold &amp; finish',
+      body: '<p>Open it out and push the two ends together, so the slit opens into a diamond. ' +
+        'Flatten it into a booklet with the cover on top.</p>' }
   ].filter(Boolean);
-  return foldDiagram() + '<ol class="steps">' + steps.map(t => '<li>' + t + '</li>').join('') + '</ol>';
+  return '<figure class="fold-plate">' + foldDiagram() + '</figure>' +
+    '<ol class="steps">' + steps.map((st, i) =>
+      '<li>' +
+        '<svg class="fold-icon" viewBox="0 0 64 64" aria-hidden="true">' + FOLD_ICONS[st.icon] + '</svg>' +
+        '<div class="step-text">' +
+          '<span class="step-no">' + String(i + 1).padStart(2, '0') + '</span>' +
+          '<h3>' + st.title + '</h3>' +
+          '<span class="step-sub">' + st.sub + '</span>' +
+          st.body +
+        '</div>' +
+      '</li>').join('') + '</ol>' +
+    '<p class="fold-note">One sheet of ' + paper + ' folds into eight pages of ' +
+      mm(g.panelW) + ' &times; ' + mm(g.panelH) + ' mm. No staples or glue needed.</p>';
 }
 
 function showFoldGuide(force) {
