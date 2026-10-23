@@ -1703,8 +1703,9 @@ function onKey(e) {
 /* ---------------------------------------------------------------- inspector */
 
 function foldDiagram() {
-  const cw = 60, ch = 42, x0 = 4, y0 = 12;
+  // Drawn in the paper's own proportions: four columns across the long side.
   const g = geom(), mmv = clampMargin(state.margin);
+  const cw = 60, ch = cw * 4 * (g.sheetH / g.sheetW) / 2, x0 = 4, y0 = 12;
   const bx = mmv / (g.sheetW / PT) * cw * 4, by = mmv / (g.sheetH / PT) * ch * 2;
   const trimOn = state.trimMargin && mmv > 0;
 
@@ -2988,10 +2989,11 @@ const FOLD_ICONS = {
   trim: '<rect x="6" y="14" width="52" height="36"/>' +
     '<rect class="dash" x="12" y="20" width="40" height="24"/>' +
     '<path d="M6 8v4M58 8v4M6 52v4M58 52v4"/>',
-  crease: '<rect x="6" y="16" width="52" height="32"/>' +
-    '<path class="dash" d="M19 16v32M32 16v32M45 16v32M6 32h52"/>',
-  slit: '<path d="M22 12h28v36H22"/><path d="M18 16v36h28v-4"/>' +
-    '<path class="dash" d="M36 12v36M36 30h14"/><path class="ink" d="M22 30h14"/>',
+  crease: '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="dash" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
+  slit: '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h14M46 32h14"/>' +
+    '<path class="ink" d="M18 32h28"/>',
   booklet: '<path d="M22 14h26v38H22z"/><path d="M18 18v38h26"/><path d="M14 22v38h26"/>' +
     '<path d="M27 23h16M27 28h11"/>'
 };

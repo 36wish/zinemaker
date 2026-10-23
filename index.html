@@ -432,13 +432,12 @@
   .toast button:hover { background: #26262f; }
 
   /* ---------- folding guide, after export ---------- */
-  /* A sheet of paper rather than more chrome: the guide is about paper, and
-     reads like the instruction card in a box — thin line drawings, numbered
-     steps, letter-spaced subheads, hairline rules. Its own palette, so it
-     stays light on the dark editor. */
+  /* Reads like the instruction card in a box — thin line drawings, numbered
+     steps, letter-spaced subheads, hairline rules — in the editor's own
+     white-on-black palette. */
   .fold-dialog {
-    --ink: #1a1a1a; --soft: #8a8a8a; --faint: #c4c4c4; --rule: #e6e6e6;
-    background: #fff; color: var(--ink); border: none;
+    --ink: var(--fg); --soft: var(--dim); --faint: #5e5e70; --rule: var(--line);
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line);
     border-radius: 4px; padding: 36px 36px 22px; width: min(520px, calc(100vw - 24px));
     max-height: calc(100vh - 24px); overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0,0,0,.6);
@@ -471,6 +470,7 @@
     stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round;
   }
   .fold-icon .dash { stroke: var(--soft); stroke-width: 1; stroke-dasharray: 3 2.5; }
+  .fold-icon .thin { stroke: var(--soft); stroke-width: .8; }
   .fold-icon .ink { stroke: var(--accent); stroke-width: 1.8; }
   .step-no { display: block; font-size: 9px; letter-spacing: .2em; color: var(--faint); }
   .step-text h3 { font-size: 14px; font-weight: 400; letter-spacing: .04em; margin: 8px 0 3px; }
@@ -491,10 +491,10 @@
   .fold-foot label { font-size: 11px; color: var(--soft); display: flex; align-items: center; gap: 6px; }
   .fold-foot input { accent-color: var(--ink); }
   .fold-foot button {
-    background: var(--ink); border-color: var(--ink); color: #fff;
+    background: var(--ink); border-color: var(--ink); color: var(--bg);
     font-weight: 400; letter-spacing: .12em; padding: 6px 18px; border-radius: 2px;
   }
-  .fold-foot button:hover { background: #3a3a3a; border-color: #3a3a3a; }
+  .fold-foot button:hover { background: #fff; border-color: #fff; }
   @media (max-width: 480px) {
     .fold-dialog { padding: 26px 20px 18px; }
     .fold-dialog .steps li { grid-template-columns: 48px 1fr; gap: 14px; }
