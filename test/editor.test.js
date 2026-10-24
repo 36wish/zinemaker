@@ -175,7 +175,7 @@ module.exports = {
       assert.eq(r.qrText.indexOf('Scan the printout') < 0, true, 'the QR inspector still explains');
       ['Double-click text to edit it', 'pours what is already on the page',
        'Scan the printout once', 'striped band', 'Fold the sheet in half the long way',
-       'Actual size', 'nudge', 'Both pages', '.zine'].forEach(phrase => {
+       'Actual size', 'nudge', 'Both pages', '.zine', 'Leave border', 'Trim it off'].forEach(phrase => {
         assert.ok(r.help.indexOf(phrase) >= 0, 'help is missing: ' + phrase);
       });
       assert.ok(r.pageText.indexOf('Layout') >= 0, 'the page controls themselves must stay in the inspector');

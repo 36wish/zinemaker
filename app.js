@@ -2081,6 +2081,13 @@ function marginIcon() {
       : '');
 }
 
+/* A page's printed size under either "After printing" choice, whichever is
+   in effect, so help can compare the two. */
+function pageSize(trimmed) {
+  const p = PAPER[state.paper], m = trimmed ? clampMargin(state.margin) : 0;
+  return mm((p.h - 2 * m) * PT / 4) + ' &times; ' + mm((p.w - 2 * m) * PT / 2) + ' mm';
+}
+
 function helpHtml() {
   const on = v => v ? 'on' : 'off';
   const trim = state.trimMargin && state.margin > 0;
@@ -2134,7 +2141,18 @@ function helpHtml() {
         chips: ['Actual size &middot; 100%', 'Landscape', 'One-sided'] },
       { icon: marginIcon(), title: 'Printer margin',
         sub: state.margin > 0 ? state.margin + ' mm' + (trim ? ' &middot; trimmed' : '') : 'None',
-        body: marginNote() },
+        body: marginNote(),
+        chips: ['<b>Print settings</b> &rarr; Printer margin', 'After printing'] },
+      { icon: 'border', title: 'Leave border', sub: 'After printing' + (state.trimMargin ? '' : ' &middot; chosen'),
+        body: 'Pages stay a full quarter of the sheet and the folds land on the paper\'s own ' +
+          'middles. The blank rim stays on the finished zine, and anything in the striped ' +
+          'band is lost to it. Nothing to cut but the slit.',
+        chips: ['Pages ' + pageSize(false), 'No trimming'] },
+      { icon: 'trimoff', title: 'Trim it off', sub: 'After printing' + (state.trimMargin ? ' &middot; chosen' : ''),
+        body: 'Pages move in from the rim and shrink a little, so nothing is clipped. ' +
+          'Cut the rim off along the printed line <b>before</b> folding and the zine ' +
+          'reads edge to edge &mdash; just a slightly smaller booklet.',
+        chips: ['Pages ' + pageSize(true), 'Paper cutter'] },
       { icon: 'guides', title: 'Print guides', sub: 'Lines',
         body: (state.cut || trim
           ? 'They fall on cuts you make anyway, so a tidy cut hides them.'
@@ -3030,6 +3048,14 @@ const GUIDE_ICONS = {
   qr: '<rect x="10" y="10" width="14" height="14"/><rect x="40" y="10" width="14" height="14"/>' +
     '<rect x="10" y="40" width="14" height="14"/>' +
     '<path d="M15 15h4v4h-4zM45 15h4v4h-4zM15 45h4v4h-4zM32 10v6M32 22h4M40 32h6M30 32h4v4M44 42h6v6M36 50h4M50 54h4"/>',
+  // Leave border: full-size pages, the printer's rim shaded over their outer edges.
+  border: '<path class="fill" fill-rule="evenodd" d="M4 12h56v40H4zM8 16v32h48V16z"/>' +
+    '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
+  // Trim it off: the pages inset by the rim, which is cut away along the red line.
+  trimoff: '<rect class="dash" x="4" y="12" width="56" height="40"/>' +
+    '<rect class="ink" x="8" y="16" width="48" height="32"/>' +
+    '<path class="thin" d="M20 16v32M32 16v32M44 16v32M8 32h48"/>',
   guides: '<rect x="4" y="12" width="56" height="40"/><rect class="thin" x="8" y="16" width="48" height="32"/>' +
     '<path class="ink" d="M18 32h28"/>',
   browser: '<rect x="6" y="12" width="52" height="40" rx="2"/><path d="M6 20h52"/>' +
