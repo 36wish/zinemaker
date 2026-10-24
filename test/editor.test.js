@@ -97,39 +97,59 @@ module.exports = {
       assert.eq(r.docs, 'mini', 'only the eight-panel document remains');
     });
 
-    t.check('help is hidden until asked for, and the button toggles it', async () => {
+    t.check('help is a dialog, hidden until asked for, and the button toggles it', async () => {
       await page.reset();
       const r = await page.evaluate(`(() => {
-        const help = document.getElementById('help'), insp = document.getElementById('inspector');
+        const dlg = document.getElementById('helpDialog'), help = document.getElementById('help');
+        const insp = document.getElementById('inspector');
         const btn = document.getElementById('helpBtn');
-        const out = { startsHidden: help.hidden, startEmpty: help.innerHTML === '',
-                      inspectorShown: !insp.hidden, pressed0: btn.getAttribute('aria-pressed') };
+        const out = { startsShut: !dlg.open, startEmpty: help.innerHTML === '',
+                      pressed0: btn.getAttribute('aria-pressed') };
         btn.click();
-        out.openShown = !help.hidden; out.openHasContent = help.textContent.length > 500;
-        out.inspectorHidden = insp.hidden; out.pressed1 = btn.getAttribute('aria-pressed');
+        out.opened = dlg.open; out.openHasContent = help.textContent.length > 200;
+        out.inspectorKept = !insp.hidden; out.pressed1 = btn.getAttribute('aria-pressed');
+        out.tabs = [...document.querySelectorAll('#helpTabs [role=tab]')].map(b => b.textContent).join(',');
+        document.querySelector('#helpTabs [data-tab="fold"]').click();
+        out.foldSelected = document.querySelector('#helpTabs [data-tab="fold"]').getAttribute('aria-selected');
         out.hasFoldDiagram = !!help.querySelector('svg.fold');
+        out.drawings = help.querySelectorAll('svg.guide-icon').length;
+        setHelpTab('edit');
         btn.click();
-        out.closedAgain = help.hidden && !insp.hidden;
+        out.closedAgain = !dlg.open && btn.getAttribute('aria-pressed') === 'false';
         setHelp(true);
         document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        out.escapeCloses = help.hidden && !insp.hidden;
+        out.escapeCloses = !dlg.open && !helpOpen;
         setHelp(true);
-        help.querySelector('[data-act="closeHelp"]').click();
-        out.closeButton = help.hidden && !insp.hidden;
+        document.getElementById('helpClose').click();
+        out.closeButton = !dlg.open && !helpOpen;
         return out;
       })()`);
-      assert.eq(r.startsHidden, true, 'help must be hidden by default');
+      assert.eq(r.startsShut, true, 'help must be shut by default');
       assert.eq(r.startEmpty, true, 'and should not even be built until opened');
-      assert.eq(r.inspectorShown, true);
       assert.eq(r.pressed0, 'false');
-      assert.eq(r.openShown, true);
+      assert.eq(r.opened, true);
       assert.eq(r.openHasContent, true);
-      assert.eq(r.inspectorHidden, true, 'help takes the place of the inspector while open');
+      assert.eq(r.inspectorKept, true, 'help floats over the editor rather than replacing the inspector');
       assert.eq(r.pressed1, 'true');
-      assert.eq(r.hasFoldDiagram, true, 'the fold diagram lives in help now');
+      assert.eq(r.tabs, 'Edit,Spread,Layout,Print,Fold,Files', 'help is split into tabs');
+      assert.eq(r.foldSelected, 'true', 'a tab click selects it');
+      assert.eq(r.hasFoldDiagram, true, 'the Fold tab is the folding guide, diagram included');
+      assert.ok(r.drawings >= 5, 'with a drawing per step');
       assert.eq(r.closedAgain, true, 'the button toggles it back');
       assert.eq(r.escapeCloses, true, 'Escape closes help');
       assert.eq(r.closeButton, true, 'the Close button closes help');
+    });
+
+    t.check('keys do not reach the page behind an open help dialog', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setActive(2); setHelp(true);
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }));
+        const active = state.active;
+        setHelp(false);
+        return active;
+      })()`);
+      assert.eq(r, 2, 'Page Down under the dialog must not turn the page');
     });
 
     t.check('the inspector holds controls and the explanations moved to help', async () => {
@@ -143,8 +163,8 @@ module.exports = {
         const qrText = insp.textContent;
         select(null); buildInspector();
         setHelp(true);
-        const help = document.getElementById('help').textContent;
-        setHelp(false);
+        const help = HELP_TABS.map(t => { setHelpTab(t.id); return document.getElementById('help').textContent; }).join(' ');
+        setHelpTab('edit'); setHelp(false);
         return { pageText: pageText, textText: textText, qrText: qrText, help: help };
       })()`);
       ['Fold in half', 'Pours what', 'pours what', 'striped band', 'Print at 100%',
@@ -152,10 +172,10 @@ module.exports = {
         assert.eq(r.pageText.indexOf(phrase) < 0, true, 'the page inspector still explains: ' + phrase);
       });
       assert.eq(r.textText.indexOf('Double-click') < 0, true, 'the text inspector still explains');
-      assert.eq(r.qrText.indexOf('scan the printout') < 0, true, 'the QR inspector still explains');
+      assert.eq(r.qrText.indexOf('Scan the printout') < 0, true, 'the QR inspector still explains');
       ['Double-click text to edit it', 'pours what is already on the page',
-       'scan the printout once', 'striped band', 'Fold in half the long way',
-       'No trimming is needed', 'Print at 100%', 'nudge'].forEach(phrase => {
+       'Scan the printout once', 'striped band', 'Fold the sheet in half the long way',
+       'Actual size', 'nudge', 'Both pages', '.zine'].forEach(phrase => {
         assert.ok(r.help.indexOf(phrase) >= 0, 'help is missing: ' + phrase);
       });
       assert.ok(r.pageText.indexOf('Layout') >= 0, 'the page controls themselves must stay in the inspector');
@@ -194,12 +214,12 @@ module.exports = {
     t.check('help describes the panel in front of you', async () => {
       await page.reset({ margin: 5 });
       const r = await page.evaluate(`(() => {
-        setHelp(true);
+        setHelp(true); setHelpTab('print');
         const text = () => document.getElementById('help').textContent;
         setActive(0); paintHelp(); const cover = text();
         setActive(2); paintHelp(); const inner = text();
         state.margin = 0; paintHelp(); const none = text();
-        setHelp(false);
+        setHelpTab('edit'); setHelp(false);
         return { cover: cover, inner: inner, none: none };
       })()`);
       assert.includes(r.cover, 'in a corner', 'the cover sits in a corner of the sheet');
