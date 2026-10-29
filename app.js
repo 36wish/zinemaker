@@ -1662,6 +1662,11 @@ function clearGuides() {
 
 function onKey(e) {
   if (e.target.matches('input, textarea, select')) return;
+  // A dialog is modal: nothing behind it should turn pages or nudge things.
+  if (document.querySelector('dialog[open]')) {
+    if (e.key === 'Escape' && helpOpen) setHelp(false);
+    return;
+  }
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z') {
     e.preventDefault(); e.shiftKey ? redo() : undo(); return;
@@ -1672,7 +1677,6 @@ function onKey(e) {
     return;
   }
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSel(); return; }
-  if (e.key === 'Escape' && helpOpen) { setHelp(false); return; }
   if (e.key === 'Escape' && sideOpen) { setSide(false); return; }
   if (e.key === 'Escape' && elemDrawerOpen) { setElemDrawer(false); return; }
   if (e.key === 'Escape' && pageDrawerOpen) { setPageDrawer(false); return; }
@@ -1703,8 +1707,9 @@ function onKey(e) {
 /* ---------------------------------------------------------------- inspector */
 
 function foldDiagram() {
-  const cw = 60, ch = 42, x0 = 4, y0 = 12;
+  // Drawn in the paper's own proportions: four columns across the long side.
   const g = geom(), mmv = clampMargin(state.margin);
+  const cw = 60, ch = cw * 4 * (g.sheetH / g.sheetW) / 2, x0 = 4, y0 = 12;
   const bx = mmv / (g.sheetW / PT) * cw * 4, by = mmv / (g.sheetH / PT) * ch * 2;
   const trimOn = state.trimMargin && mmv > 0;
 
@@ -2026,140 +2031,202 @@ function projectSectionHtml() {
 
 /* ------------------------------------------------------------------- help */
 
-/* Everything that explains rather than controls lives here, hidden until asked
-   for, so the inspector stays a column of controls. Rebuilt on demand because
-   the margin and guide notes describe the panel and settings in front of you. */
+/* Everything that explains rather than controls lives here, in a dialog
+   hidden until asked for, so the inspector stays a column of controls. It
+   is the folding guide's card, cut into tabs: a line drawing and a few words
+   per idea rather than paragraphs. Rebuilt on demand, because the margin and
+   guide notes describe the page and settings in front of you. */
 let helpOpen = false;
+let helpTab = 'edit';
+
+const HELP_TABS = [
+  { id: 'edit', label: 'Edit' },
+  { id: 'spread', label: 'Spread' },
+  { id: 'layout', label: 'Layout' },
+  { id: 'print', label: 'Print' },
+  { id: 'fold', label: 'Fold' },
+  { id: 'files', label: 'Files' }
+];
+
+/* The printer-margin note, short: what the rim costs the active page. */
+function marginNote() {
+  const g = geom(), m = state.margin;
+  if (m <= 0) {
+    return 'No margin: the artwork runs to the paper edge. Fine on a borderless ' +
+      'printer; any other will crop it a little.';
+  }
+  if (state.trimMargin) {
+    return 'The pages sit ' + m + ' mm in from the sheet edge, ' + mm(g.panelW) + ' &times; ' +
+      mm(g.panelH) + ' mm each. Trim that strip off <b>before</b> folding and the zine ' +
+      'reads edge to edge.';
+  }
+  const e = unsafeEdges(state.active), sides = [];
+  if (e.t) sides.push('top');
+  if (e.b) sides.push('bottom');
+  if (e.l) sides.push('left');
+  if (e.r) sides.push('right');
+  const safeW = g.panelW / PT - e.l - e.r, safeH = g.panelH / PT - e.t - e.b;
+  return 'Most printers cannot reach the outer ' + m + ' mm of the sheet &mdash; the ' +
+    'striped band on screen. ' + (/^\d/.test(LABELS[state.active]) ? 'Page ' : 'The ') +
+    LABELS[state.active] + ' sits ' +
+    (sides.length > 1 ? 'in a corner' : 'along an edge') + ', so its ' + sides.join(' and ') +
+    ' edge' + (sides.length > 1 ? 's are' : ' is') + ' clipped: ' + safeW.toFixed(1) +
+    ' &times; ' + safeH.toFixed(1) + ' mm is safe.';
+}
+
+/* The sheet in miniature, the active page shaded, the printer's reach dashed. */
+function marginIcon() {
+  const c = IMPOSE[state.active], x = 4 + c.col * 14, y = 12 + c.row * 20;
+  return '<rect class="fill" x="' + x + '" y="' + y + '" width="14" height="20"/>' +
+    '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>' +
+    (state.margin > 0
+      ? '<rect class="' + (state.trimMargin ? 'ink' : 'dash') + '" x="7" y="15" width="50" height="34"/>'
+      : '');
+}
+
+/* A page's printed size under either "After printing" choice, whichever is
+   in effect, so help can compare the two. */
+function pageSize(trimmed) {
+  const p = PAPER[state.paper], m = trimmed ? clampMargin(state.margin) : 0;
+  return mm((p.h - 2 * m) * PT / 4) + ' &times; ' + mm((p.w - 2 * m) * PT / 2) + ' mm';
+}
 
 function helpHtml() {
-  return '<div class="help-head"><h2>Help</h2>' +
-      '<button data-act="closeHelp">Close</button></div>' +
-
-    '<h3>Editing</h3>' +
-    '<p>Each spread shows the two pages that face each other when the zine is ' +
-      'folded: back and cover, then 2 and 3, 4 and 5, 6 and 7 &mdash; the strip ' +
-      'of thumbnails is grouped the same way. Click a page, its label above the ' +
-      'sheet, or a thumbnail to make it the page that receives new items. The ' +
-      'arrows beside the sheet, <kbd>Page Up</kbd>/<kbd>Page Down</kbd>, or ' +
-      '<kbd>&larr;</kbd>/<kbd>&rarr;</kbd> with nothing selected turn the page; ' +
-      'on a phone, swipe sideways. A phone shows one page at a time; the page ' +
-      'button in the toolbar switches to the pair and back.</p>' +
-    '<p>Double-click text to edit it, or click it again once it is selected ' +
-      '(tap again on a touch screen). Paste or drop images straight onto the ' +
-      'page, or drop a <b>.zine</b> file to open it. To choose which part of a ' +
-      'cropped photo shows, Ctrl-drag it (&#8984;-drag on a Mac), or double-click ' +
-      'it (double-tap) and drag; double-click again to go back to moving it. ' +
-      'A dashed frame from a ' +
-      'layout is waiting for a photo: click it, or drop one on it.</p>' +
-    '<p>Dragging pulls things onto page edges, centres and the printer margin ' +
-      'line; hold <kbd>Alt</kbd> to place freely. Positions and sizes are in ' +
-      'millimetres; text sizes in points.</p>' +
-    '<p><kbd>Del</kbd> removes &nbsp; <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates &nbsp; ' +
-      '<kbd>&larr;&uarr;&darr;&rarr;</kbd> nudge, with <kbd>Shift</kbd> &times;10. ' +
-      '<kbd>Shift</kbd> while dragging locks the axis; while rotating it snaps ' +
-      'to 15&deg;. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, up to 100 steps; layouts, ' +
-      'deleting and opening a file also offer an Undo button right away.</p>' +
-
-    '<h3>Across the fold</h3>' +
-    '<p>Pick a photo or a line of text and press <b>Both pages</b> to run it ' +
-      'over the fold. It still belongs to one page &mdash; that is where its ' +
-      'handles are &mdash; but it prints straight through the crease onto the ' +
-      'facing one, because the two pages of a spread sit side by side on the ' +
-      'sheet. Dragging or stretching something over the fold does the same by ' +
-      'itself; press <b>One page</b> to stop it at the fold instead. Drag ' +
-      'anything right over and it moves to the page it lands on.</p>' +
-    '<p>The fold itself takes a little: expect a hair of the picture to ' +
-      'disappear into the crease, and how squarely the halves line up depends on ' +
-      'how squarely you fold. Faces and words land badly in the middle &mdash; ' +
-      'give the fold sky, or a gap between words. A QR code across the fold will ' +
-      'usually not scan at all.</p>' +
-
-    '<h3>Layouts</h3>' +
-    '<p>A layout pours what is already on the page into its slots &mdash; photos ' +
-      'and text in the order you added them. Anything left over stays where it ' +
-      'was, and a photo slot with no photo to fill it becomes an empty frame, ' +
-      'which never prints. The two wide layouts fill the ' +
-      'whole spread rather than the one page.</p>' +
-
-    '<h3>QR codes</h3>' +
-    '<p>Keep a QR code at least 20 mm wide with a pale background behind it, and ' +
-      'scan the printout once before running off copies.</p>' +
-
-    '<h3>Printer margin</h3>' +
-    '<p>' + marginNote() + '</p>' +
-
-    '<h3>Printer alignment</h3>' +
-    '<p>Most printers put the image a few mm off where the PDF says. A wider margin ' +
-      'hides the white edge that leaves, but not the folds: they land on the middle ' +
-      'of the paper, so a shifted print folds off its page edges. <b>Line up with your ' +
-      'printer</b> prints a test sheet you fold in half each way; the creases read ' +
-      'straight off the scales how far it is out, and every export from then on moves ' +
-      'the other way by that much. A black bar runs off each edge of the same sheet: ' +
-      'where the black actually begins is how close that printer can print, and the ' +
-      'printer margin is set from the worst edge. It is kept in this browser for this printer, not ' +
-      'in the zine, so a .zine you send someone else is not shifted for their printer.</p>' +
-
-    '<h3>Folding</h3>' + foldDiagram() +
-    (state.trimMargin && state.margin > 0
-      ? '<p>Print the exported PDF on one side of a single sheet. Before folding ' +
-        'anything, trim ' + state.margin + ' mm off all four edges with a paper cutter, ' +
-        'following the line printed near the edge &mdash; that strip was always blank, ' +
-        'the printer cannot reach it, so cutting it away first just removes the border.</p>' +
-        '<p>Then fold the trimmed sheet in half the long way, then in half twice more. ' +
-        'Unfold to the long half-fold, cut the slit, then push the ends together and ' +
-        'fold into a booklet. The page grid was inset by the same amount, so the folds ' +
-        'still land exactly on the page edges, and the finished zine reads edge to edge.</p>'
-      : '<p>Print the exported PDF on one side of a single sheet. Fold in half the ' +
-        'long way, then in half twice more. Unfold to the long half-fold, cut the ' +
-        'slit, then push the ends together and fold into a booklet.</p>' +
-        '<p>No trimming is needed: every fold lands on the middle of the paper, which ' +
-        'is exactly where the page edges are.</p>') +
-
-    '<h3>Print guides</h3>' +
-    '<p>' +
-      (state.cut ? 'A solid line marks the slit. ' : '') +
-      (state.trimMargin && state.margin > 0 ? 'A solid line near the sheet edge marks the trim. ' : '') +
-      (state.cut || (state.trimMargin && state.margin > 0)
-        ? 'These fall on cuts you are making anyway &mdash; the middle line is the slit ' +
-          'and the outer one is the trim &mdash; so a tidy cut hides them. Page outlines ' +
-          'show on screen only and never print.'
-        : 'Both are off, so nothing is printed over the artwork; use the diagram above. ' +
-          'Page outlines show on screen only and never print.') +
-    '</p>' +
-
-    '<h3>AI agents</h3>' +
-    '<p>An AI assistant that works inside your browser can build the zine with ' +
-      'you: <b>Connect agent</b> copies a prompt to paste into its chat, saying ' +
-      'what it can do here and how pages and sizes are counted. Everything it ' +
-      'changes appears as it happens, and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back ' +
-      'a step at a time, like your own edits.</p>' +
-
-    '<h3>Files</h3>' +
-    '<p>Your work is kept in this browser automatically, but that is not a ' +
-      'backup &mdash; clearing site data loses it. <b>File &rarr; Save</b> writes an editable, compressed <b>.zine</b> file holding ' +
-      'everything, images included. <b>Export PDF</b> renders the sheet at 300 dpi ' +
-      'for printing; <b>PNG</b> is the same render as an image. Your work is also ' +
-      'kept in this browser between visits.</p>';
+  const on = v => v ? 'on' : 'off';
+  const trim = state.trimMargin && state.margin > 0;
+  const shift = printerShift();
+  const tabs = {
+    edit: [
+      { icon: 'spread', title: 'Spreads', sub: 'Pages',
+        body: 'Each spread is the two pages that face each other in the folded zine: back and ' +
+          'cover, then 2 and 3, 4 and 5, 6 and 7. The thumbnails are paired the same way. ' +
+          'Click a page, its label or a thumbnail to add things to it.',
+        chips: ['<b>PgUp</b> <b>PgDn</b> turn', '<b>&larr;</b> <b>&rarr;</b> turn, nothing selected',
+          'arrows beside the sheet', 'swipe on a phone'] },
+      { icon: 'phone', title: 'On a phone', sub: 'One page',
+        body: 'A phone shows one page at a time. The page button in the toolbar switches ' +
+          'to the pair and back.' },
+      { icon: 'text', title: 'Text', sub: 'Type',
+        body: 'Double-click text to edit it, or click it again once it is selected ' +
+          '(tap again on a touch screen).' },
+      { icon: 'photo', title: 'Photos', sub: 'Images',
+        body: 'Paste or drop a photo onto the page. Click a dashed frame to fill it. To choose ' +
+          'which part of a cropped photo shows, Ctrl-drag it, or double-click it and drag; ' +
+          'double-click again to go back to moving it.',
+        chips: ['<b>Ctrl</b>-drag to crop', '<b>&#8984;</b>-drag on a Mac', 'double-tap on a touch screen'] },
+      { icon: 'snap', title: 'Snapping', sub: 'Place',
+        body: 'Dragging pulls things onto page edges, centres and the printer margin. ' +
+          'Sizes are in millimetres, type in points.',
+        chips: ['<b>Alt</b> place freely', '<b>Shift</b> lock the axis', '<b>Shift</b> rotate by 15&deg;'] },
+      { icon: 'keys', title: 'Shortcuts', sub: 'Keys',
+        body: 'Undo reaches back 100 steps; layouts, deleting and opening a file offer Undo right away.',
+        chips: ['<b>Del</b> remove', '<b>Ctrl D</b> duplicate', '<b>&larr;&uarr;&darr;&rarr;</b> nudge',
+          '<b>Shift</b> &times;10', '<b>Ctrl Z</b> undo'] },
+      { icon: 'agent', title: 'AI agents', sub: 'Connect agent',
+        body: 'An AI assistant that works inside your browser can build the zine with you. ' +
+          'Connect agent copies a prompt to paste into its chat, saying what it can do here ' +
+          'and how pages and sizes are counted. Its changes appear as they happen and undo ' +
+          'a step at a time, like your own.',
+        chips: ['<b>Connect agent</b> copy the prompt', '<b>Ctrl Z</b> undo its steps'] }
+    ],
+    spread: [
+      { icon: 'span', title: 'Both pages', sub: 'Across the fold',
+        body: 'Select a photo or text and press Both pages to print it straight over the ' +
+          'crease onto the facing page. It still belongs to one page, where its handles are. ' +
+          'Dragging or stretching it across does the same.',
+        chips: ['<b>Both pages</b> run across', '<b>One page</b> stop at the fold'] },
+      { icon: 'move', title: 'Change page', sub: 'Move',
+        body: 'Drag anything right over the fold and it moves to the page it lands on.' },
+      { icon: 'gutter', title: 'Mind the crease', sub: 'Tip',
+        body: 'A hair of the picture disappears into the fold, and the halves line up only ' +
+          'as squarely as you fold. Keep faces and words out of the middle &mdash; give it ' +
+          'sky, or a gap between words. A QR code across the fold will usually not scan.' }
+    ],
+    layout: [
+      { icon: 'layout', title: 'Layouts', sub: 'Pour',
+        body: 'A layout pours what is already on the page into its slots, photos and text ' +
+          'in the order you added them. Leftovers stay where they were.' },
+      { icon: 'frame', title: 'Empty frames', sub: 'Slots',
+        body: 'A slot with no photo becomes a dashed frame. Click it or drop a photo on it. ' +
+          'It never prints.' },
+      { icon: 'wide', title: 'Wide layouts', sub: 'Spread',
+        body: 'The two wide layouts fill the whole spread, not just one page.' },
+      { icon: 'qr', title: 'QR codes', sub: 'Scan',
+        body: 'At least 20 mm wide, on a pale background. Scan the printout once before ' +
+          'making copies.' }
+    ],
+    print: [
+      { icon: 'print', title: 'Print', sub: 'Settings',
+        body: 'One side of a single sheet of ' + PAPER[state.paper].label + '.',
+        chips: ['Actual size &middot; 100%', 'Landscape', 'One-sided'] },
+      { icon: marginIcon(), title: 'Printer margin',
+        sub: state.margin > 0 ? state.margin + ' mm' + (trim ? ' &middot; trimmed' : '') : 'None',
+        body: marginNote(),
+        chips: ['<b>Print settings</b> &rarr; Printer margin', 'After printing'] },
+      { icon: 'border', title: 'Leave border', sub: 'After printing' + (state.trimMargin ? '' : ' &middot; chosen'),
+        body: 'Pages stay a full quarter of the sheet and the folds land on the paper\'s own ' +
+          'middles. The blank rim stays on the finished zine, and anything in the striped ' +
+          'band is lost to it. Nothing to cut but the slit.',
+        chips: ['Pages ' + pageSize(false), 'No trimming'] },
+      { icon: 'trimoff', title: 'Trim it off', sub: 'After printing' + (state.trimMargin ? ' &middot; chosen' : ''),
+        body: 'Pages move in from the rim and shrink a little, so nothing is clipped. ' +
+          'Cut the rim off along the printed line <b>before</b> folding and the zine ' +
+          'reads edge to edge &mdash; just a slightly smaller booklet.',
+        chips: ['Pages ' + pageSize(true), 'Paper cutter'] },
+      { icon: 'align', title: 'Printer alignment', sub: shift.x || shift.y
+          ? 'Shifted ' + shift.x + ' &middot; ' + shift.y + ' mm' : 'Not set',
+        body: 'Most printers put the image a few mm off where the PDF says, and a shifted ' +
+          'print folds off its page edges &mdash; a wider margin cannot fix that. Print the ' +
+          'test sheet and fold it in half each way: the creases read the error off its ' +
+          'scales, and every export moves back by that much. Its black edge bars set the ' +
+          'printer margin. Kept in this browser for this printer, not in the zine.',
+        chips: ['<b>Print settings</b> &rarr; Line up with your printer'] },
+      { icon: 'guides', title: 'Print guides', sub: 'Lines',
+        body: (state.cut || trim
+          ? 'They fall on cuts you make anyway, so a tidy cut hides them.'
+          : 'Nothing is printed over the artwork.') + ' Page outlines never print.',
+        chips: ['Slit line &middot; ' + on(state.cut), 'Trim line &middot; ' + on(trim)] }
+    ],
+    files: [
+      { icon: 'browser', title: 'Autosave', sub: 'This browser',
+        body: 'Your work is kept in this browser automatically. It is not a backup: ' +
+          'clearing site data loses it.' },
+      { icon: 'zine', title: 'Save a .zine', sub: 'File',
+        body: 'An editable, compressed file with every image inside. Open it again, or drop it on the page.',
+        chips: ['<b>File &rarr; Save</b>', '<b>File &rarr; Open</b>'] },
+      { icon: 'pdf', title: 'Export', sub: 'PDF &middot; PNG',
+        body: 'Export PDF renders the sheet at 300 dpi for printing. PNG is the same render as an image.' }
+    ]
+  };
+  return helpTab === 'fold' ? foldStepsHtml() : guideRows(tabs[helpTab] || tabs.edit, false);
 }
 
 function paintHelp() {
   if (!helpOpen) return;
-  const box = $('#help');
-  box.innerHTML = helpHtml();
-  box.querySelectorAll('[data-act="closeHelp"]').forEach(b =>
-    b.addEventListener('click', () => setHelp(false)));
+  $('#helpTabs').innerHTML = HELP_TABS.map(t =>
+    '<button role="tab" data-tab="' + t.id + '" aria-selected="' + (t.id === helpTab) + '"' +
+    (t.id === helpTab ? ' class="on"' : ' tabindex="-1"') + '>' + t.label + '</button>').join('');
+  const body = $('#help');
+  body.innerHTML = helpHtml();
+  body.scrollTop = 0;
+}
+
+function setHelpTab(id) {
+  if (!HELP_TABS.some(t => t.id === id)) return;
+  helpTab = id;
+  paintHelp();
 }
 
 function setHelp(open) {
   helpOpen = !!open;
-  $('#help').hidden = !helpOpen;
-  $('#inspector').hidden = helpOpen;
-  const btn = $('#helpBtn');
+  const btn = $('#helpBtn'), dlg = $('#helpDialog');
   btn.classList.toggle('on', helpOpen);
   btn.setAttribute('aria-pressed', helpOpen ? 'true' : 'false');
-  paintHelp();
-  if (helpOpen && narrow()) setSide(true);     // nowhere else for it to appear
-  syncDocSettings();          // help takes the same spot in the sheet
+  if (helpOpen) {
+    paintHelp();
+    if (!dlg.open) dlg.showModal();
+  } else if (dlg.open) dlg.close();
 }
 
 const narrow = () => window.matchMedia('(max-width: 860px)').matches;
@@ -2345,11 +2412,9 @@ function layoutMobileControls() {
   });
 }
 
-/* Help takes over the same sheet, so the document group hides while help is
-   open rather than fighting it for space. */
 function syncDocSettings() {
   layoutMobileControls();
-  $('#docSettings').hidden = !(narrow() && !helpOpen);
+  $('#docSettings').hidden = !narrow();
 }
 
 /* On a wide screen the toolbar always has room; on a phone it might not,
@@ -2392,50 +2457,6 @@ function fitBar() {
 }
 
 const mm = pt => (pt / PT).toFixed(1);
-
-function marginNote() {
-  const g = geom();
-  if (state.trimMargin) {
-    if (state.margin <= 0) {
-      return 'No margin, so there is nothing to trim. The design runs right to the ' +
-             'paper edge &mdash; fine for a borderless printer, otherwise your printer ' +
-             'will crop it for you.';
-    }
-    return 'With &ldquo;Trim it off&rdquo; on, the page grid is inset ' + state.margin +
-      ' mm from every edge of the <b>sheet</b>, so no page ever reaches into the strip ' +
-      'most printers cannot reach &mdash; nothing here is clipped. Pages are ' +
-      mm(g.panelW) + ' × ' + mm(g.panelH) + ' mm, a touch smaller than a full quarter of ' +
-      'the sheet, to leave room for the cut.<br><br>Cut that ' + state.margin + ' mm strip ' +
-      'off all four edges of the printed sheet &mdash; the line near the edge shows where ' +
-      '&mdash; <b>before</b> you fold. The folds then land exactly on the page edges, same ' +
-      'as always, and the finished zine reads edge to edge.' +
-      '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.';
-  }
-  const e = unsafeEdges(state.active);
-  if (!e) {
-    return 'No margin. The design runs right to the paper edge &mdash; fine for a ' +
-           'borderless printer, otherwise your printer will crop it for you.';
-  }
-  const sides = [];
-  if (e.t) sides.push('top');
-  if (e.b) sides.push('bottom');
-  if (e.l) sides.push('left');
-  if (e.r) sides.push('right');
-  const safeW = g.panelW / PT - e.l - e.r, safeH = g.panelH / PT - e.t - e.b;
-  const where = 'This page (' + LABELS[state.active] + ') sits ' +
-    (sides.length > 1 ? 'in a corner' : 'along an edge') + ' of the sheet, so its ';
-  return 'The outer ' + state.margin + ' mm of the <b>sheet</b> is the strip most ' +
-    'printers cannot reach. Pages keep their full ' + mm(g.panelW) + ' × ' +
-    mm(g.panelH) + ' mm so the folds still land on the page edges &mdash; instead, ' +
-    'anything in the striped band is simply lost.<br><br>' +
-    (sides.length
-      ? where + sides.join(' and ') + ' edge' + (sides.length > 1 ? 's are' : ' is') +
-        ' clipped, leaving ' + safeW.toFixed(1) + ' × ' + safeH.toFixed(1) + ' mm to work in.'
-      : 'This page is in the middle of the sheet, so none of it is clipped.') +
-    '<br><br>Print at 100% / actual size, not &ldquo;fit to page&rdquo;.' +
-    ' Turn on &ldquo;Trim it off&rdquo; below if you plan to cut this border away ' +
-    'before folding, for an edge-to-edge result.';
-}
 
 /* Shared between #inspector and, on a phone, #elemInspector / #pageInspector
    — each only ever holds markup relevant to itself (data-k and friends are
@@ -3003,16 +3024,135 @@ async function openZine(file) {
    actually needs it. "Don't show again" is a per-browser preference. */
 const FOLD_KEY = 'zinemaker.foldGuide';
 
+/* Line drawings for the guide's left column, one per row, shared by the
+   folding guide and help: 64 units square, stroked in currentColor so the
+   dialog's ink colour decides them. A value that is not a key here is taken
+   as the drawing itself (help's margin row draws one from the settings). */
+const GUIDE_ICONS = {
+  print: '<path d="M8 16h38l10 10v22H8z"/><path d="M46 16v10h10"/>' +
+    '<path d="M15 27h22M15 33h34M15 39h34"/>',
+  trim: '<rect x="6" y="14" width="52" height="36"/>' +
+    '<rect class="dash" x="12" y="20" width="40" height="24"/>' +
+    '<path d="M6 8v4M58 8v4M6 52v4M58 52v4"/>',
+  crease: '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="dash" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
+  slit: '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h14M46 32h14"/>' +
+    '<path class="ink" d="M18 32h28"/>',
+  /* Looking down on the half-folded strip: the ends pushed inward and the
+     slit between them opened into a diamond. */
+  diamond: '<path d="M4 32h12l16-18 16 18h12"/><path d="M16 32l16 18 16-18"/>' +
+    '<path class="dash" d="M32 14v36"/>' +
+    '<path class="ink" d="M4 44h8M9 41l3 3-3 3M60 44h-8M55 41l-3 3 3 3"/>',
+  // A closed booklet, page-shaped, with its spine on the left and the
+  // pages' edges showing behind the cover.
+  booklet: '<path d="M46 13h3v41H22v-3"/><path d="M49 16h3v41H25v-3"/>' +
+    '<rect x="18" y="10" width="28" height="41"/><path class="spine" d="M18 10v41"/>' +
+    '<path class="thin" d="M22 10v41"/>' +
+    '<rect class="thin" x="26" y="17" width="15" height="12"/><path d="M26 35h15M26 40h9"/>',
+  // Help: a spread of two facing pages, with the page-turn arrows beside it.
+  spread: '<path d="M11 16h21v32H11zM32 16h21v32H32z"/>' +
+    '<path class="thin" d="M6 28l-3 4 3 4M58 28l3 4-3 4"/>',
+  text: '<rect class="dash" x="8" y="18" width="48" height="28"/>' +
+    '<path d="M14 28h32M14 36h20"/><path class="ink" d="M37 30v10"/>',
+  photo: '<rect x="8" y="14" width="48" height="36"/>' +
+    '<path d="M8 44l14-14 10 10 8-8 16 16"/><circle cx="44" cy="24" r="4"/>',
+  snap: '<rect x="10" y="8" width="44" height="48"/>' +
+    '<path class="snapline" d="M32 4v56M6 32h52"/><rect x="24" y="25" width="16" height="14"/>',
+  keys: '<rect x="6" y="18" width="52" height="28" rx="3"/>' +
+    '<path d="M12 25h4M20 25h4M28 25h4M36 25h4M44 25h8M12 32h4M20 32h4M28 32h4M36 32h4M44 32h8M18 39h28"/>',
+  span: '<path d="M11 16h21v32H11zM32 16h21v32H32z"/>' +
+    '<rect class="ink" x="20" y="24" width="24" height="14"/><path class="dash" d="M32 12v40"/>',
+  move: '<path d="M11 16h21v32H11zM32 16h21v32H32z"/>' +
+    '<rect class="thin" x="15" y="26" width="12" height="10"/><rect x="38" y="26" width="12" height="10"/>' +
+    '<path class="ink" d="M24 42h12M33 39l3 3-3 3"/>',
+  gutter: '<path d="M11 16h21v32H11zM32 16h21v32H32z"/>' +
+    '<path class="ink" d="M32 16v32"/><circle cx="43" cy="30" r="5"/><path d="M38 42h10"/>',
+  layout: '<rect x="16" y="6" width="32" height="46"/><rect x="20" y="10" width="24" height="16"/>' +
+    '<path d="M20 31h24M20 35h16"/><rect class="dash" x="20" y="40" width="11" height="8"/>' +
+    '<rect class="dash" x="33" y="40" width="11" height="8"/>',
+  frame: '<rect class="dash" x="12" y="14" width="40" height="36"/><path d="M32 26v12M26 32h12"/>',
+  wide: '<path d="M11 16h21v32H11zM32 16h21v32H32z"/>' +
+    '<rect x="15" y="21" width="34" height="16"/><path class="thin" d="M15 37l10-9 8 6 6-4 10 7"/>' +
+    '<path d="M15 42h12"/>',
+  qr: '<rect x="10" y="10" width="14" height="14"/><rect x="40" y="10" width="14" height="14"/>' +
+    '<rect x="10" y="40" width="14" height="14"/>' +
+    '<path d="M15 15h4v4h-4zM45 15h4v4h-4zM15 45h4v4h-4zM32 10v6M32 22h4M40 32h6M30 32h4v4M44 42h6v6M36 50h4M50 54h4"/>',
+  // Leave border: full-size pages, the printer's rim shaded over their outer edges.
+  align: '<rect x="6" y="12" width="52" height="40"/>' +
+    '<path class="thin" d="M14 32h36M32 18v28M20 30v4M26 30v4M38 30v4M44 30v4M30 24h4M30 40h4"/>' +
+    '<path class="ink" d="M35 12v40"/>',
+  agent: '<rect x="8" y="12" width="36" height="26" rx="3"/><path d="M16 38l-4 10 12-10"/>' +
+    '<path class="thin" d="M16 22h20M16 28h14"/>' +
+    '<path class="ink" d="M50 34v12M44 40h12"/>',
+  border: '<path class="fill" fill-rule="evenodd" d="M4 12h56v40H4zM8 16v32h48V16z"/>' +
+    '<rect x="4" y="12" width="56" height="40"/>' +
+    '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
+  // Trim it off: the pages inset by the rim, which is cut away along the red line.
+  trimoff: '<rect class="dash" x="4" y="12" width="56" height="40"/>' +
+    '<rect class="ink" x="8" y="16" width="48" height="32"/>' +
+    '<path class="thin" d="M20 16v32M32 16v32M44 16v32M8 32h48"/>',
+  guides: '<rect x="4" y="12" width="56" height="40"/><rect class="thin" x="8" y="16" width="48" height="32"/>' +
+    '<path class="ink" d="M18 32h28"/>',
+  phone: '<rect x="20" y="6" width="24" height="52" rx="3"/><path class="thin" d="M30 52h4"/>' +
+    '<path d="M25 14h14v22H25z"/><path class="thin" d="M28 20h8M28 24h6"/>',
+  browser: '<rect x="6" y="12" width="52" height="40" rx="2"/><path d="M6 20h52"/>' +
+    '<path class="thin" d="M11 16h1M15 16h1M19 16h1"/><path d="M26 28h12v18H26z"/><path class="thin" d="M30 33h4M30 37h4"/>',
+  zine: '<path d="M16 8h22l10 10v38H16z"/><path d="M38 8v10h10"/>' +
+    '<path class="thin" d="M22 30h10v14H22zM32 30h10v14H32z"/>',
+  pdf: '<path d="M16 8h22l10 10v38H16z"/><path d="M38 8v10h10"/>' +
+    '<path class="ink" d="M32 26v18M26 38l6 6 6-6"/>'
+};
+
+/* One row per idea: drawing on the left, then an optional step number,
+   title, letter-spaced subhead, a line or two and any chips. Help and the
+   folding guide both draw with it. A chip holding <b> is a key: the key
+   in ink, its meaning softer. */
+function guideRows(rows, numbered) {
+  const chips = list => '<p class="chips">' + list.map(t =>
+    '<span class="chip' + (t.indexOf('<b>') >= 0 ? ' key' : '') + '">' + t + '</span>').join('') + '</p>';
+  return (numbered ? '<ol' : '<ul') + ' class="steps">' + rows.map((r, i) =>
+    '<li>' +
+      '<svg class="guide-icon" viewBox="0 0 64 64" aria-hidden="true">' +
+        (GUIDE_ICONS[r.icon] || r.icon) + '</svg>' +
+      '<div class="step-text">' +
+        (numbered ? '<span class="step-no">' + String(i + 1).padStart(2, '0') + '</span>' : '') +
+        '<h3>' + r.title + '</h3>' +
+        '<span class="step-sub">' + r.sub + '</span>' +
+        (r.body ? '<p>' + r.body + '</p>' : '') +
+        (r.chips ? chips(r.chips) : '') +
+        (r.after ? '<p>' + r.after + '</p>' : '') +
+      '</div>' +
+    '</li>').join('') + (numbered ? '</ol>' : '</ul>');
+}
+
 function foldStepsHtml() {
   const trim = state.trimMargin && state.margin > 0;
+  const g = geom(), paper = PAPER[state.paper].label;
   const steps = [
-    'Print it on <b>one side</b> of a single sheet, landscape, at <b>100% / actual size</b> &mdash; not &ldquo;fit to page&rdquo;.',
-    trim ? 'Trim ' + state.margin + ' mm off all four edges, along the line printed near the edge.' : null,
-    'Fold it in half the long way, then in half twice more the other way, and open it back out: the creases mark the eight pages.',
-    'Fold it in half with the short ends together. From the folded edge, cut along the middle crease as far as the next crease &mdash; the red line in the picture.',
-    'Open it, push the two ends together so the cut opens into a diamond, and flatten it into a booklet with the cover on top.'
+    { icon: 'print', title: 'Print', sub: 'Print settings',
+      body: 'Print the PDF on one side of a single sheet of ' + paper + '. ' +
+        'In the print dialog choose',
+      chips: ['Actual size &middot; 100%', 'Landscape', 'One-sided'],
+      after: 'Not &ldquo;fit to page&rdquo; &mdash; that shrinks the artwork and the folds miss it.' },
+    trim ? { icon: 'trim', title: 'Trim', sub: 'Trim the border',
+      body: 'Cut ' + state.margin + ' mm off all four edges with a paper cutter, ' +
+        'along the line printed near the edge. That strip was blank anyway.' } : null,
+    { icon: 'crease', title: 'Crease', sub: 'Fold &amp; unfold',
+      body: 'Fold the sheet in half the long way, then in half twice more the other way. ' +
+        'Open it back out: the creases mark the eight pages.' },
+    { icon: 'slit', title: 'Cut the slit', sub: 'Cut',
+      body: 'Fold it in half with the short ends together. From the folded edge, ' +
+        'cut along the middle crease as far as the next one &mdash; the red line ' +
+        'in the diagram' + (state.cut ? ', and the line printed on the sheet' : '') + '.' },
+    { icon: 'diamond', title: 'Open the diamond', sub: 'Push',
+      body: 'Open it out and push the two ends together, so the slit opens into a diamond.' },
+    { icon: 'booklet', title: 'Flatten the booklet', sub: 'Finish',
+      body: 'Flatten it into a booklet with the cover on top.' }
   ].filter(Boolean);
-  return foldDiagram() + '<ol class="steps">' + steps.map(t => '<li>' + t + '</li>').join('') + '</ol>';
+  return '<figure class="guide-plate">' + foldDiagram() + '</figure>' + guideRows(steps, true) +
+    '<p class="guide-note">One sheet of ' + paper + ' folds into eight pages of ' +
+      Math.round(g.panelW / PT) + ' &times; ' + Math.round(g.panelH / PT) + ' mm. No staples or glue needed.</p>';
 }
 
 function showFoldGuide(force) {
@@ -3421,6 +3561,21 @@ async function init() {
   $('#openZine').addEventListener('click', () => $('#zineFile').click());
   $('#saveZine').addEventListener('click', saveZine);
   $('#helpBtn').addEventListener('click', () => setHelp(!helpOpen));
+  $('#helpClose').addEventListener('click', () => setHelp(false));
+  // Escape closes a modal dialog by itself; keep the button's state in step.
+  $('#helpDialog').addEventListener('close', () => { if (helpOpen) setHelp(false); });
+  $('#helpTabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-tab]');
+    if (b) setHelpTab(b.dataset.tab);
+  });
+  $('#helpTabs').addEventListener('keydown', e => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const i = HELP_TABS.findIndex(t => t.id === helpTab);
+    setHelpTab(HELP_TABS[(i + step + HELP_TABS.length) % HELP_TABS.length].id);
+    $('#helpTabs .on').focus();
+  });
   $('#panelBtn').addEventListener('click', () => setSide(!sideOpen));
   $('#sideClose').addEventListener('click', () => setSide(false));
   $('#elemPeek').addEventListener('click', () => setElemDrawer(!elemDrawerOpen));

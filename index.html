@@ -415,6 +415,7 @@
   .fold text { font: 9px sans-serif; fill: var(--dim); }
   .fold rect { fill: none; stroke: var(--line); }
   .fold .cut { stroke: var(--accent); stroke-width: 2; }
+  .fold .band { stroke-dasharray: 3 2; }
 
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
@@ -431,40 +432,131 @@
   .toast button:hover { background: #26262f; }
 
   /* ---------- folding guide, after export ---------- */
-  .fold-dialog {
-    background: var(--bg2); color: var(--fg); border: 1px solid var(--line);
-    border-radius: 12px; padding: 18px 20px; width: min(440px, calc(100vw - 32px));
+  /* Reads like the instruction card in a box — thin line drawings, numbered
+     steps, letter-spaced subheads, hairline rules — in the editor's own
+     white-on-black palette. */
+  .guide {
+    --ink: var(--fg); --soft: var(--dim); --faint: #5e5e70; --rule: var(--line);
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 4px; padding: 36px 36px 22px; width: min(520px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px); overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    font-weight: 300;
   }
-  .fold-dialog::backdrop { background: rgba(0,0,0,.55); }
-  .fold-dialog h2 { font-size: 15px; margin: 0 0 12px; }
-  .fold-dialog .steps { margin: 0 0 14px; padding-left: 20px; line-height: 1.55; color: var(--dim); }
-  .fold-dialog .steps li { margin-bottom: 6px; }
-  .fold-dialog .steps b { color: var(--fg); }
-  .fold-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .fold-foot .grow { flex: 1; }
+  .guide::backdrop { background: rgba(0,0,0,.55); }
+  .guide-head { text-align: center; margin-bottom: 22px; }
+  .guide-head::before {
+    content: ""; display: block; width: 1px; height: 28px;
+    background: var(--faint); margin: 0 auto 18px;
+  }
+  .guide h2 { font-size: 17px; font-weight: 400; letter-spacing: .08em; margin: 0; }
+  .guide-kicker, .step-sub {
+    display: block; font-size: 9px; letter-spacing: .32em; text-transform: uppercase;
+    color: var(--soft);
+  }
+  .guide-kicker { margin: 6px 0 0; }
+  .guide-plate { margin: 0; padding: 18px 0; border-top: 1px solid var(--rule); }
+  .guide-plate .fold { margin: 0 auto; max-width: 340px; }
+  .guide-plate .fold text { fill: var(--soft); font-weight: 300; }
+  .guide-plate .fold rect { stroke: var(--ink); stroke-width: .75; }
+  .guide-plate .fold .band { stroke: var(--soft); }
+  .guide .steps { list-style: none; margin: 0; padding: 0; }
+  .guide .steps li {
+    display: grid; grid-template-columns: 76px 1fr; gap: 20px;
+    padding: 22px 0; border-top: 1px solid var(--rule);
+  }
+  .guide-icon {
+    width: 64px; height: 64px; fill: none; stroke: var(--ink);
+    stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round;
+  }
+  .guide-icon .dash { stroke: var(--soft); stroke-width: 1; stroke-dasharray: 3 2.5; }
+  .guide-icon .thin { stroke: var(--soft); stroke-width: .8; }
+  .guide-icon .ink { stroke: var(--accent); stroke-width: 1.8; }
+  .guide-icon .spine { stroke-width: 2.4; stroke-linecap: butt; }
+  .step-no { display: block; font-size: 9px; letter-spacing: .2em; color: var(--faint); }
+  .step-text h3 { font-size: 14px; font-weight: 400; letter-spacing: .04em; margin: 8px 0 3px; }
+  .step-text p { font-size: 12px; line-height: 1.75; color: var(--soft); margin: 10px 0 0; }
+  .guide .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    font-size: 10px; letter-spacing: .06em; color: var(--ink);
+    border: 1px solid var(--faint); border-radius: 2px; padding: 1px 7px;
+  }
+  .guide-note {
+    font-size: 10px; line-height: 1.7; color: var(--faint); text-align: center;
+    margin: 0; padding: 16px 0 18px; border-top: 1px solid var(--rule);
+  }
+  .guide-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding-top: 14px; border-top: 1px solid var(--rule);
+  }
+  .guide-foot label { font-size: 11px; color: var(--soft); display: flex; align-items: center; gap: 6px; }
+  .guide-foot input { accent-color: var(--ink); }
+  .guide-foot button {
+    background: var(--ink); border-color: var(--ink); color: var(--bg);
+    font-weight: 400; letter-spacing: .12em; padding: 6px 18px; border-radius: 2px;
+  }
+  .guide-foot button:hover { background: #fff; border-color: #fff; }
+  @media (max-width: 480px) {
+    .guide { padding: 26px 20px 18px; }
+    .guide .steps li { grid-template-columns: 48px 1fr; gap: 14px; }
+    .guide-icon { width: 48px; height: 48px; }
+  }
+  /* The alignment dialog is a guide card too, but holds a form: plain
+     numbered steps rather than drawings, then the readings. */
+  .align-guide { width: min(560px, calc(100vw - 24px)); }
+  .align-steps {
+    margin: 0; padding: 16px 0 16px 20px; border-top: 1px solid var(--rule);
+    font-size: 12px; line-height: 1.75; color: var(--soft);
+  }
+  .align-steps li { margin-bottom: 8px; padding-left: 4px; }
+  .align-steps li::marker { color: var(--faint); font-size: 10px; letter-spacing: .1em; }
+  .align-steps b { color: var(--ink); font-weight: 500; }
+  .align-steps button { margin: 0 2px; }
+  .align-fields { padding-top: 16px; border-top: 1px solid var(--rule); }
   .align-note { margin: 4px 0 14px; min-height: 2.2em; }
   .align-edges {
     display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px 10px;
     align-items: center; margin: 4px 0 10px;
   }
   .align-edges label.f { margin: 0; }
-  .fold-foot label { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .guide-foot .grow { flex: 1; }
+  .align-guide .guide-foot button:not(.primary) {
+    background: transparent; border-color: var(--faint); color: var(--ink);
+  }
+  .align-guide .guide-foot button:not(.primary):hover { background: #26262f; border-color: var(--soft); }
 
   /* ---------- help ---------- */
-  .help { color: var(--dim); font-size: 12px; line-height: 1.6; }
-  .help[hidden], #inspector[hidden] { display: none; }
-  .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-  .help-head h2 { margin: 0; }
-  .help h3 {
-    font-size: 11px; font-weight: 600; color: var(--fg); margin: 18px 0 6px;
-    letter-spacing: .02em;
+  /* The guide card again, with tabs. Fixed height, so changing tab does not
+     make the dialog jump; only the body scrolls. */
+  #inspector[hidden] { display: none; }
+  .help-guide[open] {
+    display: flex; flex-direction: column; overflow: hidden;
+    height: min(760px, calc(100vh - 24px)); width: min(560px, calc(100vw - 24px));
+    padding-bottom: 22px;
   }
-  .help p { margin: 0 0 8px; }
-  .help b { color: var(--fg); font-weight: 600; }
-  .help kbd {
-    background: #26262f; border: 1px solid var(--line); border-bottom-width: 2px;
-    border-radius: 4px; padding: 0 4px; font: 11px/1.4 "Courier New", monospace;
+  .help-guide .guide-head { margin-bottom: 18px; }
+  .guide-tabs {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 2px 4px;
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 6px 0;
+  }
+  .guide-tabs button {
+    background: transparent; border: none; border-radius: 0; color: var(--soft);
+    font-size: 10px; font-weight: 400; letter-spacing: .24em; text-transform: uppercase;
+    padding: 8px 10px; box-shadow: inset 0 -1px 0 transparent;
+  }
+  .guide-tabs button:hover { color: var(--ink); background: transparent; }
+  .guide-tabs button.on { color: var(--ink); box-shadow: inset 0 -1px 0 var(--ink); }
+  .guide-body { flex: 1; overflow-y: auto; min-height: 0; }
+  .guide-body > .steps > li:first-child, .guide-body > .guide-plate { border-top: none; }
+  .guide-hint { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--faint); }
+  .chip.key { color: var(--soft); }
+  .chip b { color: var(--ink); font-weight: 500; }
+  .guide-icon .fill { fill: var(--faint); stroke: none; }
+  .guide-icon .snapline { stroke: var(--accent2); stroke-width: 1; stroke-dasharray: 3 2.5; }
+  @media (max-width: 480px) {
+    .help-guide[open] { padding: 22px 16px 16px; }
+    .guide-tabs button { padding: 8px 6px; letter-spacing: .14em; }
+    .guide-hint { visibility: hidden; }
   }
   button.ghost.on { background: #26262f; border-color: var(--accent2); color: #fff; }
 
@@ -842,7 +934,6 @@
     </div>
   </div>
   <!-- Explanatory text lives here, hidden until the Help button is pressed. -->
-  <div id="help" class="help" hidden></div>
   <div id="inspector"></div>
 </aside>
 <!-- The selected element's own controls, on a phone only (see syncElemDrawer
@@ -870,20 +961,39 @@
   <div id="pageInspector"></div>
 </div>
 <div class="toast" id="toast" role="status"></div>
+<!-- Help, behind the ? button: the folding guide's card, cut into tabs. -->
+<dialog id="helpDialog" class="guide help-guide" aria-labelledby="helpTitle">
+  <header class="guide-head">
+    <h2 id="helpTitle">Help</h2>
+    <p class="guide-kicker">How it works</p>
+  </header>
+  <div id="helpTabs" class="guide-tabs" role="tablist" aria-label="Help topics"></div>
+  <div id="help" class="guide-body" role="tabpanel"></div>
+  <div class="guide-foot">
+    <span class="guide-hint">Esc closes</span>
+    <button id="helpClose">Close</button>
+  </div>
+</dialog>
 <!-- Shown after an export: how to get from the printout to a booklet. -->
-<dialog id="foldDialog" class="fold-dialog" aria-labelledby="foldTitle">
-  <h2 id="foldTitle">Ready to print and fold</h2>
+<dialog id="foldDialog" class="guide" aria-labelledby="foldTitle">
+  <header class="guide-head">
+    <h2 id="foldTitle">Print &amp; fold</h2>
+    <p class="guide-kicker">Folding guide</p>
+  </header>
   <div id="foldBody"></div>
-  <div class="fold-foot">
+  <div class="guide-foot">
     <label><input type="checkbox" id="foldNoShow"> Don&rsquo;t show after every export</label>
     <button class="primary" id="foldClose">Got it</button>
   </div>
 </dialog>
 
 <!-- Lining the export up with the printer: a test sheet, then its readings. -->
-<dialog id="alignDialog" class="fold-dialog" aria-labelledby="alignTitle">
-  <h2 id="alignTitle">Line up with your printer</h2>
-  <ol class="steps">
+<dialog id="alignDialog" class="guide align-guide" aria-labelledby="alignTitle">
+  <header class="guide-head">
+    <h2 id="alignTitle">Line up with your printer</h2>
+    <p class="guide-kicker">Printer alignment</p>
+  </header>
+  <ol class="align-steps">
     <li><button id="alignSheet">Download the test sheet</button> and print it on one side, at
       <b>100% / actual size</b>, on the printer and paper you use for zines.</li>
     <li>Fold it in half <b>left edge to right edge</b>, corners exactly together. Crease and unfold.
@@ -893,28 +1003,30 @@
     <li>On each edge, type in the mark where the black bar begins. That sets the
       printer margin; leave them empty to keep it as it is.</li>
   </ol>
-  <div class="row">
-    <label class="f grow" for="alignX" style="margin:0">Left &ndash; right reads</label>
-    <input class="num" type="number" id="alignX" step="0.5" min="-20" max="20" placeholder="0">
-    <span class="hint">mm</span>
+  <div class="align-fields">
+    <div class="row">
+      <label class="f grow" for="alignX" style="margin:0">Left &ndash; right reads</label>
+      <input class="num" type="number" id="alignX" step="0.5" min="-20" max="20" placeholder="0">
+      <span class="hint">mm</span>
+    </div>
+    <div class="row">
+      <label class="f grow" for="alignY" style="margin:0">Up &ndash; down reads</label>
+      <input class="num" type="number" id="alignY" step="0.5" min="-20" max="20" placeholder="0">
+      <span class="hint">mm</span>
+    </div>
+    <div class="align-edges">
+      <label class="f" for="alignEdge-l">Left edge</label>
+      <input class="num" type="number" id="alignEdge-l" step="0.5" min="0" max="25" placeholder="&ndash;">
+      <label class="f" for="alignEdge-r">Right edge</label>
+      <input class="num" type="number" id="alignEdge-r" step="0.5" min="0" max="25" placeholder="&ndash;">
+      <label class="f" for="alignEdge-t">Top edge</label>
+      <input class="num" type="number" id="alignEdge-t" step="0.5" min="0" max="25" placeholder="&ndash;">
+      <label class="f" for="alignEdge-b">Bottom edge</label>
+      <input class="num" type="number" id="alignEdge-b" step="0.5" min="0" max="25" placeholder="&ndash;">
+    </div>
+    <p class="hint align-note"><span id="alignNow"></span> <span id="alignNote"></span></p>
   </div>
-  <div class="row">
-    <label class="f grow" for="alignY" style="margin:0">Up &ndash; down reads</label>
-    <input class="num" type="number" id="alignY" step="0.5" min="-20" max="20" placeholder="0">
-    <span class="hint">mm</span>
-  </div>
-  <div class="align-edges">
-    <label class="f" for="alignEdge-l">Left edge</label>
-    <input class="num" type="number" id="alignEdge-l" step="0.5" min="0" max="25" placeholder="&ndash;">
-    <label class="f" for="alignEdge-r">Right edge</label>
-    <input class="num" type="number" id="alignEdge-r" step="0.5" min="0" max="25" placeholder="&ndash;">
-    <label class="f" for="alignEdge-t">Top edge</label>
-    <input class="num" type="number" id="alignEdge-t" step="0.5" min="0" max="25" placeholder="&ndash;">
-    <label class="f" for="alignEdge-b">Bottom edge</label>
-    <input class="num" type="number" id="alignEdge-b" step="0.5" min="0" max="25" placeholder="&ndash;">
-  </div>
-  <p class="hint align-note"><span id="alignNow"></span> <span id="alignNote"></span></p>
-  <div class="fold-foot">
+  <div class="guide-foot">
     <button class="ghost" id="alignReset">Reset</button>
     <span class="grow"></span>
     <button id="alignCancel">Cancel</button>

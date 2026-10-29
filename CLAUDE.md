@@ -49,7 +49,7 @@ than reimplementing it.
 | suite | covers |
 |---|---|
 | `qr.test.js` | the encoder, in plain Node (`qr.js` is requireable) |
-| `editor.test.js` | elements, spread selection, synthesised drag/rotate gestures, templates, undo |
+| `editor.test.js` | elements, spread selection, synthesised drag/rotate gestures, templates, undo, help dialog and tabs |
 | `print.test.js` | imposition, margins and guides, the printer shift and its test sheet, measured off the raster |
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
 | `mobile.test.js` | the phone layout, measured on an emulated handset |
@@ -196,11 +196,18 @@ A test derives this from `IMPOSE` rather than trusting it.
 `paintAll()` = `paintPage()` + `paintStrip()` + `buildInspector()`. `paintPage()`
 rebuilds the visible spread into `#sheet` and keeps `nodes`, an id→DOM map.
 
-The sidebar is two elements: `#inspector` (controls only) and `#help`, hidden until
-the toolbar's Help button is pressed and built on demand by `helpHtml()`. **Explanatory
-text belongs in `helpHtml()`, not in the inspector** — a test asserts the inspector
-stays free of it. Help is rebuilt from `buildInspector()` so its margin note keeps
-describing the active panel.
+The sidebar holds `#inspector` (controls only). Help is a modal dialog,
+`#helpDialog`, opened by the toolbar's Help button through `setHelp()` and built
+on demand by `helpHtml()`, one tab at a time (`HELP_TABS`, `helpTab`,
+`setHelpTab()`). It is the folding guide's card cut into tabs: every row goes
+through `guideRows()` — a line drawing from `GUIDE_ICONS`, a title, a letter-spaced
+subhead, a sentence or two and optional chips — and the Fold tab *is*
+`foldStepsHtml()`. Keep it that way: a drawing and a few words per idea, not
+paragraphs. **Explanatory text belongs in `helpHtml()`, not in the inspector** — a
+test asserts the inspector stays free of it. Help is rebuilt from `buildInspector()`
+so its margin note and drawing (`marginNote()`, `marginIcon()`) keep describing the
+active panel. While any dialog is open, `onKey()` ignores everything but Escape, so
+nothing turns pages behind it.
 
 Two invariants worth knowing before touching it:
 
@@ -331,7 +338,7 @@ so the script and the stylesheet cannot disagree. Under it the sidebar stops bei
 column and becomes a sheet that slides up over the stage, toggled by `#panelBtn` and
 `setSide()`; `body.side-open` is the only state. **Never hide the inspector on a
 phone** — it is the only place most controls exist, which is what the earlier
-breakpoint got wrong. Help shares that sheet, so `setHelp(true)` opens it.
+breakpoint got wrong. Help is a dialog at every width and never touches the sheet.
 
 **`#panelBtn` ("Print settings" on a wide screen) means the whole project, full
 stop — never a page or a selected element — and that now holds at every width,
@@ -385,9 +392,7 @@ landing spots). `captureMobileAnchors()` drops a comment node in front of each o
 the first time it runs, so `layoutMobileControls()` can put it back with
 `marker.after(el)` on a wide screen; nothing is cloned, so there is no second copy
 to keep in sync. `syncDocSettings()` drives both the move and `#docSettings`'
-visibility, and hides that whole group while help is open rather than moving
-anything — help and the document group share the one sheet. It runs from `init()`,
-from `setHelp()`, and from the `resize` handler, so crossing the breakpoint either
+visibility. It runs from `init()` and from the `resize` handler, so crossing the breakpoint either
 way sorts itself out. **Scope any CSS aimed at the toolbar's copy of these
 elements to `.bar`** (e.g. `.bar #title`), because an ID selector still matches
 them after they move.
@@ -520,7 +525,9 @@ per-browser preference like the recent colours: it belongs to the printer, so
 it is never in `state` and never in a `.zine` file.
 
 The "Printer alignment" group in `projectSectionHtml()` opens `#alignDialog`
-(`showAlignDialog()`), which offers `exportCalibration()`'s test sheet. That
+(`showAlignDialog()`, a `.guide` card like help and the folding guide, holding
+a form rather than drawings), which offers `exportCalibration()`'s test sheet.
+Help's Print tab has a row for it that shows the saved shift. That
 sheet (`buildCalibrationNode()`) carries scales across the middle of the
 paper: fold it in half each way and each crease reads off how far the printed
 middle missed. **The sheet is built with the current correction already in**, so

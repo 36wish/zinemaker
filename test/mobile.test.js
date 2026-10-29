@@ -92,14 +92,22 @@ module.exports = {
       assert.eq(await page.evaluate('sideOpen'), false);
     });
 
-    t.check('help opens the sheet, because it has nowhere else to appear', async () => {
+    t.check('help opens as a dialog that fits the phone, leaving the sheet shut', async () => {
       await phone();
       await page.evaluate("document.getElementById('helpBtn').click()");
       await settle();
-      const r = await rect('#side');
-      assert.near(r.bottom, 740, 1, 'asking for help must bring the sheet up');
-      assert.ok(await page.evaluate("!document.getElementById('help').hidden"));
-      await page.evaluate("setHelp(false); setSide(false);");
+      const r = await rect('#helpDialog');
+      assert.ok(r.left >= 0 && r.right <= 390, 'the dialog must fit the width, got ' + r.left + '..' + r.right);
+      assert.ok(r.top >= 0 && r.bottom <= 740, 'and the height, got ' + r.top + '..' + r.bottom);
+      const tabs = await page.evaluate(`(() => {
+        const t = document.getElementById('helpTabs');
+        return { open: document.getElementById('helpDialog').open, sheet: sideOpen,
+                 oneRow: t.getBoundingClientRect().height < 50 };
+      })()`);
+      assert.eq(tabs.open, true);
+      assert.eq(tabs.sheet, false, 'the settings sheet has no part in help any more');
+      assert.eq(tabs.oneRow, true, 'the six tabs fit one row on a phone');
+      await page.evaluate("setHelp(false);");
       await settle();
     });
 
@@ -132,23 +140,6 @@ module.exports = {
       })()`);
       assert.eq(r.title, 'Phone Edited', 'the relocated title input should still update state');
       assert.eq(r.paper, 'letter', 'the relocated paper select should still update state');
-    });
-
-    t.check('help hides the document group without moving its controls back out', async () => {
-      await phone();
-      await page.evaluate("document.getElementById('helpBtn').click()");
-      await settle();
-      const open = await page.evaluate(`({
-        docHidden: document.getElementById('docSettings').hidden,
-        stillParked: document.getElementById('slotTitle').contains(document.getElementById('title'))
-      })`);
-      assert.eq(open.docHidden, true, 'help takes over the sheet, so the document group steps aside');
-      assert.eq(open.stillParked, true, 'closing help should not have to re-fetch the title from the toolbar');
-
-      await page.evaluate("setHelp(false); setSide(false);");
-      await settle();
-      const closed = await page.evaluate("document.getElementById('docSettings').hidden");
-      assert.eq(closed, false, 'closing help brings the document group back');
     });
 
     t.check('nothing overflows the width, and the toolbar leaves the stage room', async () => {
