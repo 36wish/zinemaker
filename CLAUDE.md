@@ -530,8 +530,9 @@ just never sees the tools, so it costs the static-page rule nothing.
 unregistered by aborting the signal, and whatever `execute` resolves to is
 handed over as JSON) over `navigator.modelContext` (earlier previews and the
 MCP-B polyfill, which expect an MCP `CallToolResult`, so `agentContent()` wraps
-results in content blocks there, a preview as an image block). Chromium's own
-`executeTool()` takes the arguments as JSON text, which `execute` accepts too.
+results in content blocks there, a preview as an image block). Chrome's own
+`executeTool()` takes the arguments as an object in some versions and as JSON
+text in others; `execute` accepts both, and the native test tries both.
 
 `AGENT_TOOLS` is the whole list, each a `{ name, title, description,
 inputSchema, annotations, run }`, and `callAgentTool(name, input)` is the one

@@ -29,10 +29,16 @@ module.exports = {
       const r = await page.evaluate(`(async () => {
         const mc = document.modelContext;
         if (!mc || typeof mc.getTools !== 'function') return { native: false };
-        // Chromium takes the agent's arguments as the JSON text it sent.
+        // Chrome versions differ: some take the arguments as an object, some
+        // as the JSON text the agent sent. Either has to reach the tool.
         const tools = await mc.getTools();
         const add = tools.find(t => t.name === 'add_text');
-        const out = add ? await mc.executeTool(add, JSON.stringify({ page: 3, text: 'from the agent' })) : null;
+        const args = { page: 3, text: 'from the agent' };
+        let out = null;
+        if (add) {
+          try { out = await mc.executeTool(add, args); }
+          catch (err) { out = await mc.executeTool(add, JSON.stringify(args)); }
+        }
         return { native: true, names: tools.map(t => t.name), out: out,
                  placed: doc().panels[2].els.map(e => e.text) };
       })()`);
