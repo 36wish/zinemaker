@@ -2094,14 +2094,22 @@ function helpHtml() {
   const tabs = {
     edit: [
       { icon: 'spread', title: 'Spreads', sub: 'Pages',
-        body: 'Each spread is the two pages that face each other in the folded zine. ' +
-          'Click a page or a thumbnail to add things to it. A phone shows one page at a time.',
-        chips: ['<b>PgUp</b> <b>PgDn</b> turn', '<b>&larr;</b> <b>&rarr;</b> turn', 'swipe on a phone'] },
+        body: 'Each spread is the two pages that face each other in the folded zine: back and ' +
+          'cover, then 2 and 3, 4 and 5, 6 and 7. The thumbnails are paired the same way. ' +
+          'Click a page, its label or a thumbnail to add things to it.',
+        chips: ['<b>PgUp</b> <b>PgDn</b> turn', '<b>&larr;</b> <b>&rarr;</b> turn, nothing selected',
+          'arrows beside the sheet', 'swipe on a phone'] },
+      { icon: 'phone', title: 'On a phone', sub: 'One page',
+        body: 'A phone shows one page at a time. The page button in the toolbar switches ' +
+          'to the pair and back.' },
       { icon: 'text', title: 'Text', sub: 'Type',
-        body: 'Double-click text to edit it, or click it again once it is selected.' },
+        body: 'Double-click text to edit it, or click it again once it is selected ' +
+          '(tap again on a touch screen).' },
       { icon: 'photo', title: 'Photos', sub: 'Images',
-        body: 'Paste or drop a photo onto the page. Click a dashed frame to fill it.',
-        chips: ['<b>Ctrl</b>-drag to crop', 'or double-click, then drag'] },
+        body: 'Paste or drop a photo onto the page. Click a dashed frame to fill it. To choose ' +
+          'which part of a cropped photo shows, Ctrl-drag it, or double-click it and drag; ' +
+          'double-click again to go back to moving it.',
+        chips: ['<b>Ctrl</b>-drag to crop', '<b>&#8984;</b>-drag on a Mac', 'double-tap on a touch screen'] },
       { icon: 'snap', title: 'Snapping', sub: 'Place',
         body: 'Dragging pulls things onto page edges, centres and the printer margin. ' +
           'Sizes are in millimetres, type in points.',
@@ -2114,13 +2122,15 @@ function helpHtml() {
     spread: [
       { icon: 'span', title: 'Both pages', sub: 'Across the fold',
         body: 'Select a photo or text and press Both pages to print it straight over the ' +
-          'crease onto the facing page. Dragging or stretching it across does the same.',
+          'crease onto the facing page. It still belongs to one page, where its handles are. ' +
+          'Dragging or stretching it across does the same.',
         chips: ['<b>Both pages</b> run across', '<b>One page</b> stop at the fold'] },
       { icon: 'move', title: 'Change page', sub: 'Move',
         body: 'Drag anything right over the fold and it moves to the page it lands on.' },
       { icon: 'gutter', title: 'Mind the crease', sub: 'Tip',
-        body: 'A hair of the picture disappears into the fold. Keep faces, words and QR ' +
-          'codes out of the middle &mdash; give it sky, or a gap between words.' }
+        body: 'A hair of the picture disappears into the fold, and the halves line up only ' +
+          'as squarely as you fold. Keep faces and words out of the middle &mdash; give it ' +
+          'sky, or a gap between words. A QR code across the fold will usually not scan.' }
     ],
     layout: [
       { icon: 'layout', title: 'Layouts', sub: 'Pour',
@@ -3058,6 +3068,8 @@ const GUIDE_ICONS = {
     '<path class="thin" d="M20 16v32M32 16v32M44 16v32M8 32h48"/>',
   guides: '<rect x="4" y="12" width="56" height="40"/><rect class="thin" x="8" y="16" width="48" height="32"/>' +
     '<path class="ink" d="M18 32h28"/>',
+  phone: '<rect x="20" y="6" width="24" height="52" rx="3"/><path class="thin" d="M30 52h4"/>' +
+    '<path d="M25 14h14v22H25z"/><path class="thin" d="M28 20h8M28 24h6"/>',
   browser: '<rect x="6" y="12" width="52" height="40" rx="2"/><path d="M6 20h52"/>' +
     '<path class="thin" d="M11 16h1M15 16h1M19 16h1"/><path d="M26 28h12v18H26z"/><path class="thin" d="M30 33h4M30 37h4"/>',
   zine: '<path d="M16 8h22l10 10v38H16z"/><path d="M38 8v10h10"/>' +
