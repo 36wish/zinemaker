@@ -90,6 +90,10 @@ agent does shows up on screen as it happens and is one undo step, so you can
 take any of it back. Positions are in millimetres and pages are numbered 1
 (cover) to 8 (back), as the editor shows them. Without WebMCP nothing changes.
 
+**Connect agent** in the toolbar copies a ready-made prompt for the agent: what
+the tools are, how pages and sizes are counted, this zine's page size and
+printer margin. Paste it into the agent's chat and add what you want made.
+
 ## Development
 
 No build, no package manager, no dependency, no test framework beyond what's

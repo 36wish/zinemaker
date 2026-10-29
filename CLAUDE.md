@@ -469,9 +469,14 @@ side gutter on a wide screen, hidden on a phone), Page Up/Down, ←/→ when not
 selected, or a swipe. The thumbnail strip is drawn in `.pair`s following `SPREADS`,
 so it reads exactly as the stage does.
 
-On a wide screen the toolbar must stay one row too: below 1340px the save note and
-the secondary buttons' words (`.btn-label.opt`) go, below 1120px the logo and
+On a wide screen the toolbar must stay one row too: below 1490px the Connect
+agent button's words (`.agent-label`) go, below 1390px the save note and the
+secondary buttons' words (`.btn-label.opt`), below 1120px the logo and
 dividers, below 1000px "Export". The add buttons keep their words throughout.
+Those widths were measured, not guessed — the row has only a few pixels to
+spare just above each one — so re-measure them (resize from 861px to 1700px
+and check every child sits on one line) after adding anything to the bar.
+On a phone `#agentBtn` is hidden outright rather than shrunk into the row.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.
@@ -557,6 +562,16 @@ reading order (pink over the printer rim, dashed empty frames — neither in the
 export) or the imposed sheet via `buildSheetNode()`. Add a tool by adding an
 entry to `AGENT_TOOLS`, with schema fragments from `AGENT_P`; keep names
 `[A-Za-z0-9_.-]`, which the draft requires.
+
+The toolbar's **Connect agent** button (`#agentBtn`, wired in `init()` and
+hidden there if `mcp.js` is missing) runs `copyAgentPrompt()`: it copies
+`agentPrompt()` — the tool list, the page numbering and the real page size,
+the printer margin, and to start with `get_zine` and check with
+`render_preview` — ending in "What I would like:" for the person to finish.
+The prompt is built from `AGENT_TOOLS` and the live document, so a new tool
+shows up in it by itself. It also names `callAgentTool()` as the way in for an
+agent that can run JavaScript in the page but sees no WebMCP. Copying falls back
+from `navigator.clipboard` to a hidden textarea and `execCommand('copy')`.
 
 ## Other agent configs
 

@@ -695,3 +695,63 @@ function registerAgentTools() {
   });
   return n;
 }
+
+/* ------------------------------------------------------- connect an agent */
+
+/* What the toolbar's Connect agent button copies: enough for an agent in
+   this browser to find the tools and use them well without first having to
+   discover the conventions. Built from AGENT_TOOLS and the live document, so
+   it never names a tool that is not there or a page size that is wrong. */
+function agentPrompt() {
+  const g = geom(), m = clampMargin(state.margin);
+  const native = !!(document.modelContext || navigator.modelContext);
+  return [
+    'Help me make a zine in Zine Maker, the page open in this browser tab' +
+      (/^https?:/.test(location.href) ? ' (' + location.href + ')' : '') + '. ' +
+      'It is called "' + state.title + '".',
+    '',
+    'The page offers these WebMCP tools for editing it:',
+    AGENT_TOOLS.map(t => '- ' + t.name + ': ' + t.title).join('\n'),
+    native ? 'If those tools are not available to you but you can run JavaScript in the page, ' +
+             'call any of them the same way with await callAgentTool(\'get_zine\', {}) — the ' +
+             'same arguments, the same results.'
+           : 'This browser does not offer WebMCP, so call them by running JavaScript in the page: ' +
+             'await callAgentTool(\'get_zine\', {}) — the tool name, then its arguments.',
+    '',
+    'How it works:',
+    '- One sheet of ' + PAPER[state.paper].label + ' folds into an eight-page booklet. Pages are ' +
+      'numbered 1 (front cover) to 8 (back cover); facing pages are 8|1 (the outside), 2|3, 4|5 and 6|7.',
+    '- Each page is ' + mmv(g.panelW) + ' × ' + mmv(g.panelH) + ' mm. Positions and sizes are in mm ' +
+      'from the top-left of the element\'s page; font sizes are in points.',
+    m ? '- The printer cannot reach a ' + m + ' mm strip around the sheet; get_zine lists which edges of ' +
+        'each page lose it. Keep words and faces clear of it and act on the warnings tools return.'
+      : '- There is no printer margin set, so artwork can run right to the edge.',
+    '- Start with get_zine, and check your work with render_preview — look at it before saying you are done.',
+    '- Every change shows on my screen as you make it and is one undo step I can take back.',
+    '- Photos come from https or data: URLs. Ask me before export_zine: it downloads a file.',
+    '',
+    'What I would like:',
+    ''
+  ].join('\n');
+}
+
+async function copyAgentPrompt() {
+  const text = agentPrompt();
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch (err) {
+    // No async clipboard (an insecure origin, or permission refused): the old
+    // way still works from a click.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+  }
+  toast(ok ? 'Copied a prompt for your AI agent — paste it into its chat and add what you want.'
+           : 'Could not reach the clipboard. Allow clipboard access for this site and try again.',
+        ok ? 4000 : 5000);
+  return ok;
+}

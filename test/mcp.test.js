@@ -288,5 +288,50 @@ module.exports = {
       const s = await page.evaluate(`({ title: $('#title').value, paper: $('#paper').value, m: state.margin })`);
       assert.deepEq(s, { title: 'night bus', paper: 'letter', m: 3 });
     });
+
+    t.check('Connect agent copies a prompt naming every tool and the real page size', async () => {
+      await page.reset({ title: 'night bus', margin: 4 });
+      const r = await page.evaluate(`(async () => {
+        const btn = $('#agentBtn');
+        const shown = btn.offsetWidth > 0;
+        let copied = null;
+        const real = Object.getOwnPropertyDescriptor(Navigator.prototype, 'clipboard');
+        Object.defineProperty(navigator, 'clipboard', { configurable: true,
+          value: { writeText: t => { copied = t; return Promise.resolve(); } } });
+        btn.click();
+        for (let i = 0; i < 50 && !/Copied/.test($('#toast').textContent); i++) await new Promise(res => setTimeout(res, 10));
+        delete navigator.clipboard;
+        const g = geom();
+        return { shown: shown, copied: copied, toast: $('#toast').textContent,
+                 size: mmv(g.panelW) + ' × ' + mmv(g.panelH) + ' mm',
+                 tools: AGENT_TOOLS.map(t => t.name) };
+      })()`);
+      assert.eq(r.shown, true, 'the button is in the toolbar on a wide screen');
+      assert.ok(r.copied, 'something reached the clipboard');
+      r.tools.forEach(n => assert.includes(r.copied, '- ' + n + ':', 'the prompt lists ' + n));
+      assert.includes(r.copied, r.size, 'the page size is the real one');
+      assert.includes(r.copied, '"night bus"');
+      assert.includes(r.copied, '4 mm strip');
+      assert.includes(r.copied, "callAgentTool('get_zine'", 'a way in for an agent that can only run JavaScript');
+      assert.includes(r.toast, 'Copied a prompt');
+    });
+
+    t.check('without the async clipboard the prompt still copies the old way', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(async () => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true,
+          value: { writeText: () => Promise.reject(new Error('denied')) } });
+        const exec = document.execCommand;
+        let selected = null;
+        document.execCommand = cmd => { selected = cmd === 'copy' ? String(getSelection() || document.activeElement.value) : null; return true; };
+        const ok = await copyAgentPrompt();
+        document.execCommand = exec;
+        delete navigator.clipboard;
+        return { ok: ok, selected: selected, left: document.querySelectorAll('body > textarea').length };
+      })()`);
+      assert.eq(r.ok, true);
+      assert.includes(r.selected, 'get_zine', 'the prompt was what got copied');
+      assert.eq(r.left, 0, 'the helper textarea is cleaned up');
+    });
   }
 };
