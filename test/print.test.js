@@ -500,6 +500,140 @@ module.exports = {
       assert.ok(r.ink > 20, 'the rendered sheet looks blank');
     });
 
+    /* Ink edges in mm, projected across the whole axis rather than sampled
+       along one line: the first and last column (row) that is mostly ink. */
+    const EDGES = `const edges = cv => {
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const cols = new Array(cv.width).fill(0), rows = new Array(cv.height).fill(0);
+        for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+          if (d[(y * cv.width + x) * 4] < 128) { cols[x]++; rows[y]++; }
+        }
+        const span = (a, need) => { const i = a.findIndex(n => n > need);
+          let j = a.length - 1; while (j > 0 && !(a[j] > need)) j--; return [i, a.length - 1 - j]; };
+        const perMm = cv.width / (geom().sheetW / PT);
+        const h = span(cols, cv.height / 2), v = span(rows, cv.width / 2);
+        return { l: h[0] / perMm, r: h[1] / perMm, t: v[0] / perMm, b: v[1] / perMm };
+      };`;
+
+    t.check('the printer shift moves the whole export, rim included, against the printer', async () => {
+      await page.reset({ margin: 5, cut: false });
+      const r = await page.evaluate(`(async () => {
+        ${EDGES}
+        state.docs.mini.panels.forEach(p => { p.bg = '#000000'; p.els = []; });
+        const g = geom();
+        const plain = edges(await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 100 / 72));
+        setPrinterShift(4, -2);           // prints 4 mm too far right, 2 mm too high
+        const moved = edges(await rasterize(buildSheetNode(), g.sheetW, g.sheetH, 100 / 72));
+        setPrinterShift(0, 0);
+        return { plain: plain, moved: moved };
+      })()`);
+      ['l', 'r', 't', 'b'].forEach(k => assert.near(r.plain[k], 5, 0.3, 'unshifted ' + k));
+      assert.near(r.moved.l, 1, 0.3, 'moved 4 mm left');
+      assert.near(r.moved.r, 9, 0.3, 'so the right-hand rim grows by as much');
+      assert.near(r.moved.t, 7, 0.3, 'moved 2 mm down');
+      assert.near(r.moved.b, 3, 0.3, 'so the bottom rim shrinks by as much');
+    });
+
+    t.check('the test sheet centres its scales on the middle, with the correction in', async () => {
+      await page.reset({ margin: 5 });
+      const r = await page.evaluate(`(async () => {
+        setPrinterShift(3, -1.5);
+        const g = geom(), s = 300 / 72, mmPx = s * PT;
+        const node = buildCalibrationNode();
+        const labels = [...node.querySelectorAll('text')].map(t => ({ s: t.textContent, x: +t.getAttribute('x') }));
+        const cv = await rasterize(node, g.sheetW, g.sheetH, s);
+        setPrinterShift(0, 0);
+        const ctx = cv.getContext('2d');
+        // Only the 5 mm ticks reach 3-4 mm out from a scale's line: project
+        // that band and find the middle one of the seven runs of ink.
+        const middle = (x, y, w, h, across) => {
+          const d = ctx.getImageData(x, y, w, h).data, n = across ? w : h;
+          const ink = new Array(n).fill(0);
+          for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+            if (d[(j * w + i) * 4] < 128) ink[across ? i : j]++;
+          }
+          const runs = [];
+          ink.forEach((v, i) => {
+            if (!v) return;
+            const last = runs[runs.length - 1];
+            if (last && last.end === i - 1) { last.end = i; } else runs.push({ start: i, end: i });
+          });
+          return { count: runs.length, mid: runs.length === 7 ? (runs[3].start + runs[3].end) / 2 : NaN };
+        };
+        const cx = g.sheetW / 2, cy = g.sheetH / 2;
+        const y0 = g.sheetH * 0.3 + 1.5 * PT;   // the upper scale, as shifted
+        const h = middle(Math.round((cx - 25 * PT) * s), Math.round((y0 + 3 * PT) * s),
+                         Math.round(50 * mmPx), Math.round(mmPx), true);
+        const x0 = g.sheetW * 0.3 - 3 * PT;     // the left-hand scale, as shifted
+        // (only ±16 mm down: the heading sits just above the scale)
+        const cyS = cy + 1.5 * PT;              // and its middle, as shifted
+        const v = middle(Math.round((x0 + 3 * PT) * s), Math.round((cyS - 16 * PT) * s),
+                         Math.round(mmPx), Math.round(32 * mmPx), false);
+        return {
+          hCount: h.count, vCount: v.count,
+          hMm: (h.mid / s + cx - 25 * PT - cx) / PT,
+          vMm: (v.mid / s + cyS - 16 * PT - cy) / PT,
+          plusLeft: labels.find(l => l.s === '+5').x < labels.find(l => l.s === '0').x
+        };
+      })()`);
+      assert.eq(r.hCount, 7, 'seven 5 mm ticks across');
+      assert.eq(r.vCount, 7, 'seven 5 mm ticks down');
+      assert.near(r.hMm, -3, 0.15, 'zero sits 3 mm left of the middle');
+      assert.near(r.vMm, 1.5, 0.15, 'and 1.5 mm below it');
+      assert.eq(r.plusLeft, true, '"+" (too far right) is on the left, where the crease falls');
+    });
+
+    t.check('the test sheet runs a bar off each edge, ruled from that edge', async () => {
+      await page.reset({ margin: 5 });
+      const r = await page.evaluate(`(async () => {
+        const g = geom(), s = 300 / 72, mmPx = s * PT;
+        // Where each bar's black begins and ends, in mm in from its edge,
+        // walking along the bar's middle.
+        const reach = async () => {
+          // the export's own movement, followed across each bar (not along it)
+          const sh = printerShift(), mx = -sh.x * PT, my = -sh.y * PT;
+          const node = buildCalibrationNode();
+          const cv = await rasterize(node, g.sheetW, g.sheetH, s);
+          const ctx = cv.getContext('2d');
+          const run = (gauge) => {
+            // The raster leaves the outermost pixel or two pale on some edges
+            // (rasterize() fitting the SVG to whole pixels), so start 4 px in.
+            let from = null, to = null;
+            for (let d = 4; d < 20 * mmPx; d++) {
+              const p = gauge.at(d / s, -GAUGE.bar * PT / 2);
+              const x = Math.min(cv.width - 1, Math.round((p[0] + (gauge.across ? mx : 0)) * s));
+              const y = Math.min(cv.height - 1, Math.round((p[1] + (gauge.across ? 0 : my)) * s));
+              const dark = ctx.getImageData(x, y, 1, 1).data[0] < 64;
+              if (dark && from === null) from = d;
+              if (!dark && from !== null) { to = d; break; }
+            }
+            // Black from the first pixel looked at means black from the edge.
+            return [from === 4 ? 0 : from / mmPx, to / mmPx].map(v => Math.round(v * 10) / 10);
+          };
+          const out = {};
+          EDGE_GAUGES(g.sheetW, g.sheetH).forEach(gg => { out[gg.edge] = run(gg); });
+          const four = [...node.querySelectorAll('text')].find(t => t.textContent === '4');
+          out.four = +four.getAttribute('x') / PT;
+          return out;
+        };
+        const plain = await reach();
+        setPrinterShift(2, -1);      // too far right and too high: moves left and down
+        const moved = await reach();
+        setPrinterShift(0, 0);
+        return { plain: plain, moved: moved };
+      })()`);
+      const near = (got, want, msg) => {
+        assert.near(got[0], want[0], 0.2, msg + ' (black begins)');
+        assert.near(got[1], want[1], 0.2, msg + ' (black ends)');
+      };
+      ['l', 'r', 't', 'b'].forEach(k => near(r.plain[k], [0, 11], k + ' bar runs off its edge'));
+      assert.near(r.plain.four, 4, 0.05, 'the left ruler counts from the left edge');
+      near(r.moved.l, [0, 9], 'moved 2 mm left, the left bar runs 2 mm off the PDF');
+      near(r.moved.r, [2, 13], 'and the right one starts 2 mm in');
+      near(r.moved.t, [1, 12], 'moved 1 mm down, the top bar starts 1 mm in');
+      near(r.moved.b, [0, 10], 'and the bottom one runs 1 mm off');
+    });
+
     t.check('US Letter keeps the same quarter-and-half relationship', async () => {
       await page.reset({ paper: 'letter' });
       const g = await page.evaluate('(() => { const g = geom(); return ' +

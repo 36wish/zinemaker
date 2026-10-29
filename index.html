@@ -442,6 +442,13 @@
   .fold-dialog .steps li { margin-bottom: 6px; }
   .fold-dialog .steps b { color: var(--fg); }
   .fold-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .fold-foot .grow { flex: 1; }
+  .align-note { margin: 4px 0 14px; min-height: 2.2em; }
+  .align-edges {
+    display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px 10px;
+    align-items: center; margin: 4px 0 10px;
+  }
+  .align-edges label.f { margin: 0; }
   .fold-foot label { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
 
   /* ---------- help ---------- */
@@ -870,6 +877,48 @@
   <div class="fold-foot">
     <label><input type="checkbox" id="foldNoShow"> Don&rsquo;t show after every export</label>
     <button class="primary" id="foldClose">Got it</button>
+  </div>
+</dialog>
+
+<!-- Lining the export up with the printer: a test sheet, then its readings. -->
+<dialog id="alignDialog" class="fold-dialog" aria-labelledby="alignTitle">
+  <h2 id="alignTitle">Line up with your printer</h2>
+  <ol class="steps">
+    <li><button id="alignSheet">Download the test sheet</button> and print it on one side, at
+      <b>100% / actual size</b>, on the printer and paper you use for zines.</li>
+    <li>Fold it in half <b>left edge to right edge</b>, corners exactly together. Crease and unfold.
+      Then fold it <b>top edge to bottom edge</b> and crease.</li>
+    <li>Type in the number where each crease crosses its scale, <b>with its sign</b>.
+      Half-way between two ticks is fine: 4.5, &minus;1.5.</li>
+    <li>On each edge, type in the mark where the black bar begins. That sets the
+      printer margin; leave them empty to keep it as it is.</li>
+  </ol>
+  <div class="row">
+    <label class="f grow" for="alignX" style="margin:0">Left &ndash; right reads</label>
+    <input class="num" type="number" id="alignX" step="0.5" min="-20" max="20" placeholder="0">
+    <span class="hint">mm</span>
+  </div>
+  <div class="row">
+    <label class="f grow" for="alignY" style="margin:0">Up &ndash; down reads</label>
+    <input class="num" type="number" id="alignY" step="0.5" min="-20" max="20" placeholder="0">
+    <span class="hint">mm</span>
+  </div>
+  <div class="align-edges">
+    <label class="f" for="alignEdge-l">Left edge</label>
+    <input class="num" type="number" id="alignEdge-l" step="0.5" min="0" max="25" placeholder="&ndash;">
+    <label class="f" for="alignEdge-r">Right edge</label>
+    <input class="num" type="number" id="alignEdge-r" step="0.5" min="0" max="25" placeholder="&ndash;">
+    <label class="f" for="alignEdge-t">Top edge</label>
+    <input class="num" type="number" id="alignEdge-t" step="0.5" min="0" max="25" placeholder="&ndash;">
+    <label class="f" for="alignEdge-b">Bottom edge</label>
+    <input class="num" type="number" id="alignEdge-b" step="0.5" min="0" max="25" placeholder="&ndash;">
+  </div>
+  <p class="hint align-note"><span id="alignNow"></span> <span id="alignNote"></span></p>
+  <div class="fold-foot">
+    <button class="ghost" id="alignReset">Reset</button>
+    <span class="grow"></span>
+    <button id="alignCancel">Cancel</button>
+    <button class="primary" id="alignApply">Apply</button>
   </div>
 </dialog>
 
