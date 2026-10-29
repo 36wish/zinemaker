@@ -2816,12 +2816,20 @@ function buildPDF(pages) {
 const slug = s => (s || 'zine').toLowerCase().replace(/[^a-z0-9]+/g, '-')
   .replace(/^-|-$/g, '').slice(0, 40) || 'zine';
 
+/* Browsers give a page no event for a refused download, but the usual cause is
+   visible: the click that triggers it is no longer inside a user gesture (a long
+   export outlasts it), or the site has been denied automatic downloads. Returns
+   true when it warned, so the caller can leave its own "Saved" toast out. */
 function download(blob, name) {
+  const stale = !!navigator.userActivation && !navigator.userActivation.isActive;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  if (stale) toast('Your browser may have blocked the download of ' + name +
+    '. If nothing was saved, allow downloads for this site (look in the address bar) and try again.', 10000);
+  return stale;
 }
 
 /* ---------------------------------------------------------- the .zine file
@@ -2939,10 +2947,8 @@ async function saveZine() {
   assets.forEach(a => { parts.push(u32(a.bytes.length)); parts.push(a.bytes); });
 
   const blob = new Blob(parts, { type: 'application/octet-stream' });
-  download(blob, slug(state.title) + '.zine');
-  const plain = JSON.stringify(Object.assign({}, meta, { docs: state.docs })).length;
-  toast('Saved ' + slug(state.title) + '.zine — ' + kb(blob.size) +
-        ' (' + Math.max(0, Math.round((1 - blob.size / plain) * 100)) + '% smaller than JSON)', 3200);
+  if (!download(blob, slug(state.title) + '.zine'))
+    toast('Saved ' + slug(state.title) + '.zine — ' + kb(blob.size), 3200);
 }
 
 const kb = n => n < 1024 ? n + ' B'
@@ -3469,13 +3475,14 @@ async function exportSheet(kind) {
   try {
     const g = geom();
     const cv = await rasterize(buildSheetNode(), g.sheetW, g.sheetH, DPI / 72);
+    let warned;
     if (kind === 'png') {
       const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
-      download(blob, slug(state.title) + '.png');
+      warned = download(blob, slug(state.title) + '.png');
     } else {
-      download(await canvasPdf(cv, g), slug(state.title) + '.pdf');
+      warned = download(await canvasPdf(cv, g), slug(state.title) + '.pdf');
     }
-    toast('Saved ' + slug(state.title) + '.' + kind, 2200);
+    if (!warned) toast('Saved ' + slug(state.title) + '.' + kind, 2200);
     showFoldGuide();
   } catch (err) {
     console.error(err);
