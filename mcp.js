@@ -637,7 +637,7 @@ async function callAgentTool(name, input) {
 }
 
 /* WebMCP's current draft hands the agent whatever execute resolves to,
-   serialised as JSON. Earlier previews and the MCP-B polyfill pass the result
+   serialised as JSON, so a refused call resolves to { error }. Earlier previews and the MCP-B polyfill pass the result
    through as an MCP CallToolResult instead, so there it is wrapped in content
    blocks — an image as an image block, so the agent actually sees it. */
 function agentContent(r) {
@@ -675,12 +675,14 @@ function registerAgentTools() {
       name: t.name, title: t.title, description: t.description,
       inputSchema: t.inputSchema, annotations: t.annotations || {},
       // Arguments arrive parsed; accept them still as JSON text, just in case.
-      execute: input => callAgentTool(t.name, typeof input === 'string' ? JSON.parse(input) : input).then(
+      // A refusal resolves rather than throws: Chrome swaps anything execute
+      // throws for a generic "invocation failed", and the agent never hears
+      // which property was wrong or what it should have been.
+      execute: input => Promise.resolve().then(() =>
+        callAgentTool(t.name, typeof input === 'string' ? JSON.parse(input) : input)).then(
         r => legacy ? agentContent(r) : r,
-        err => {
-          if (!legacy) throw err;
-          return { content: [{ type: 'text', text: err.message }], isError: true };
-        })
+        err => legacy ? { content: [{ type: 'text', text: err.message }], isError: true }
+                      : { error: err.message })
     };
     try {
       const handle = mc.registerTool(def, { signal: abort.signal });
