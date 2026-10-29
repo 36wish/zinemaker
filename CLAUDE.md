@@ -15,7 +15,7 @@ editing model — `SPREADS`, `IMPOSE` and export never hear about it.
 
 ## Commands
 
-There is no build, no package manager, no dependency, and no test framework. Three
+There is no build, no package manager, no dependency, and no test framework. Four
 files load directly in a browser.
 
 ```bash
@@ -27,7 +27,7 @@ node test/run.js                     # everything, ~3s
 node test/run.js "cut line"          # substring filter on "<suite> <test>"
 
 # Syntax check after editing
-node --check app.js && node --check qr.js
+node --check app.js && node --check qr.js && node --check mcp.js
 ```
 
 **Never add a bundler, a CDN `<script>`, or an npm dependency.** The app is required
@@ -54,6 +54,7 @@ than reimplementing it.
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
 | `mobile.test.js` | the phone layout, measured on an emulated handset |
 | `pages.test.js` | the site served over HTTP from a project subpath |
+| `mcp.test.js` | the WebMCP tools: registration (native, current draft, legacy), each tool's effect, the preview raster |
 | `usability.test.js` | settings hand-back, mm fields, labels, photo frames, page turning, snapping, swatches, undo toasts and depth, fold guide |
 
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
@@ -77,6 +78,8 @@ so a single scanline lands in a gap and reports a missing line that is really th
   history, elements, layouts, drawing, interaction, inspector, export, `.zine`, boot.
 - `qr.js` — self-contained QR encoder, exposed as the global `QR`. Byte mode,
   versions 1–10, EC levels L/M/Q/H.
+- `mcp.js` — the editor as WebMCP tools for an AI agent (see "Agent tools").
+  Loaded after `app.js` and built entirely on its globals.
 - `.nojekyll` — makes GitHub Pages serve the files verbatim.
 
 Deploying is just publishing the repo root: there is no build step, every path is
@@ -466,9 +469,14 @@ side gutter on a wide screen, hidden on a phone), Page Up/Down, ←/→ when not
 selected, or a swipe. The thumbnail strip is drawn in `.pair`s following `SPREADS`,
 so it reads exactly as the stage does.
 
-On a wide screen the toolbar must stay one row too: below 1340px the save note and
-the secondary buttons' words (`.btn-label.opt`) go, below 1120px the logo and
+On a wide screen the toolbar must stay one row too: below 1490px the Connect
+agent button's words (`.agent-label`) go, below 1390px the save note and the
+secondary buttons' words (`.btn-label.opt`), below 1120px the logo and
 dividers, below 1000px "Export". The add buttons keep their words throughout.
+Those widths were measured, not guessed — the row has only a few pixels to
+spare just above each one — so re-measure them (resize from 861px to 1700px
+and check every child sits on one line) after adding anything to the bar.
+On a phone `#agentBtn` is hidden outright rather than shrunk into the row.
 
 Zoom is a CSS `scale()` on `#sheet` with `transform-origin: top left`, and
 `--iz` (its inverse) is set alongside so handles and hairlines can counter-scale.
@@ -515,6 +523,58 @@ elements carry `asset` in place of `src`, swapped back on load.
 
 `readZine()` sniffs a leading `{` and still parses the plain-JSON format version 1.
 Keep that path when changing the format.
+
+### Agent tools (WebMCP)
+
+`mcp.js` offers the editor to an AI agent working in the same browser, through
+WebMCP: the page registers tools with the browser's model context and the agent
+calls them. It is not a server and opens nothing — a browser without WebMCP
+just never sees the tools, so it costs the static-page rule nothing.
+`registerAgentTools()` runs at the end of `init()` and prefers
+`document.modelContext` (the current draft: `registerTool(tool, { signal })`,
+unregistered by aborting the signal, and whatever `execute` resolves to is
+handed over as JSON — so a refused call **resolves** to `{ error }` there
+rather than throwing, because Chrome replaces anything `execute` throws with a
+generic "invocation failed" and the agent would never hear the reason) over
+`navigator.modelContext` (earlier previews and the
+MCP-B polyfill, which expect an MCP `CallToolResult`, so `agentContent()` wraps
+results in content blocks there, a preview as an image block). Chrome's own
+`executeTool()` takes the arguments as an object in some versions and as JSON
+text in others; `execute` accepts both, and the native test tries both.
+
+`AGENT_TOOLS` is the whole list, each a `{ name, title, description,
+inputSchema, annotations, run }`, and `callAgentTool(name, input)` is the one
+way in, for the model context and the tests alike. The interface speaks the
+UI's language rather than the document's: **pages are numbered 1–8 and
+geometry is in millimetres**, font sizes in points; `agentApply()` converts on
+the way in and `agentDescribe()` on the way out, reporting a text box's
+laid-out height (measured off screen) and warnings such as artwork in the
+printer rim. `agentCheck()` validates every input against the tool's own
+schema — unknown keys included — and anything refused is refused **before**
+`pushHistory()`, so a bad call leaves no undo step.
+
+Each changing tool is exactly one undo step in the shared history, and ends in
+`agentShow()`: the page it touched comes up, the element is selected, and it
+saves like any other edit — the person watching sees every change land and can
+undo it. Where an app function already does the whole job (`applyTemplate`,
+`movePage`, `undo`, `exportSheet`, `saveZine`) the tool calls it; adding is done
+directly rather than through `addText()`/`addQr()`, which start an edit or wait
+on the file picker. Photos go through `importImage()`, so they are downscaled
+and land as data URLs like any import. `render_preview` rasterises a spread in
+reading order (pink over the printer rim, dashed empty frames — neither in the
+export) or the imposed sheet via `buildSheetNode()`. Add a tool by adding an
+entry to `AGENT_TOOLS`, with schema fragments from `AGENT_P`; keep names
+`[A-Za-z0-9_.-]`, which the draft requires.
+
+The toolbar's **Connect agent** button (`#agentBtn`, wired in `init()` and
+hidden there if `mcp.js` is missing) runs `copyAgentPrompt()`: it copies
+`agentPrompt()` — the tool list, the page numbering and the real page size,
+the printer margin, and to start with `get_zine` and check with
+`render_preview` — ending in "What I would like:" for the person to finish.
+The prompt is built from `AGENT_TOOLS` and the live document, so a new tool
+shows up in it by itself. It also names `callAgentTool()` as the way in for an
+agent that can run JavaScript in the page but sees no WebMCP. Copying falls back
+from `navigator.clipboard` to a hidden textarea and `execCommand('copy')`.
 
 ## Other agent configs
 

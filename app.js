@@ -2112,6 +2112,13 @@ function helpHtml() {
           'Page outlines show on screen only and never print.') +
     '</p>' +
 
+    '<h3>AI agents</h3>' +
+    '<p>An AI assistant that works inside your browser can build the zine with ' +
+      'you: <b>Connect agent</b> copies a prompt to paste into its chat, saying ' +
+      'what it can do here and how pages and sizes are counted. Everything it ' +
+      'changes appears as it happens, and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back ' +
+      'a step at a time, like your own edits.</p>' +
+
     '<h3>Files</h3>' +
     '<p>Your work is kept in this browser automatically, but that is not a ' +
       'backup &mdash; clearing site data loses it. <b>File &rarr; Save</b> writes an editable, compressed <b>.zine</b> file holding ' +
@@ -3213,6 +3220,14 @@ async function init() {
   syncUndo();
   paintAll();
   save();
+  // The editor's tools, for an AI agent in a browser with WebMCP (mcp.js),
+  // and the button that hands an agent the prompt to use them.
+  if (typeof registerAgentTools === 'function') {
+    registerAgentTools();
+    $('#agentBtn').addEventListener('click', copyAgentPrompt);
+  } else {
+    $('#agentBtn').style.display = 'none';     // .bar .icon would override [hidden]
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
