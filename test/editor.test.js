@@ -178,7 +178,7 @@ module.exports = {
        'Actual size', 'nudge', 'Both pages', '.zine', 'Leave border', 'Trim it off',
        'back and cover', 'nothing selected', 'one page at a time', 'touch screen', 'on a Mac',
        'double-click again', 'where its handles are', 'squarely', 'will usually not scan',
-       'Printer alignment', 'test sheet'].forEach(phrase => {
+       'Printer alignment', 'test sheet', 'Connect agent'].forEach(phrase => {
         assert.ok(r.help.indexOf(phrase) >= 0, 'help is missing: ' + phrase);
       });
       assert.ok(r.pageText.indexOf('Layout') >= 0, 'the page controls themselves must stay in the inspector');

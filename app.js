@@ -2122,7 +2122,13 @@ function helpHtml() {
       { icon: 'keys', title: 'Shortcuts', sub: 'Keys',
         body: 'Undo reaches back 100 steps; layouts, deleting and opening a file offer Undo right away.',
         chips: ['<b>Del</b> remove', '<b>Ctrl D</b> duplicate', '<b>&larr;&uarr;&darr;&rarr;</b> nudge',
-          '<b>Shift</b> &times;10', '<b>Ctrl Z</b> undo'] }
+          '<b>Shift</b> &times;10', '<b>Ctrl Z</b> undo'] },
+      { icon: 'agent', title: 'AI agents', sub: 'Connect agent',
+        body: 'An AI assistant that works inside your browser can build the zine with you. ' +
+          'Connect agent copies a prompt to paste into its chat, saying what it can do here ' +
+          'and how pages and sizes are counted. Its changes appear as they happen and undo ' +
+          'a step at a time, like your own.',
+        chips: ['<b>Connect agent</b> copy the prompt', '<b>Ctrl Z</b> undo its steps'] }
     ],
     spread: [
       { icon: 'span', title: 'Both pages', sub: 'Across the fold',
@@ -3076,6 +3082,9 @@ const GUIDE_ICONS = {
   align: '<rect x="6" y="12" width="52" height="40"/>' +
     '<path class="thin" d="M14 32h36M32 18v28M20 30v4M26 30v4M38 30v4M44 30v4M30 24h4M30 40h4"/>' +
     '<path class="ink" d="M35 12v40"/>',
+  agent: '<rect x="8" y="12" width="36" height="26" rx="3"/><path d="M16 38l-4 10 12-10"/>' +
+    '<path class="thin" d="M16 22h20M16 28h14"/>' +
+    '<path class="ink" d="M50 34v12M44 40h12"/>',
   border: '<path class="fill" fill-rule="evenodd" d="M4 12h56v40H4zM8 16v32h48V16z"/>' +
     '<rect x="4" y="12" width="56" height="40"/>' +
     '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
@@ -3530,6 +3539,12 @@ function setMenu(btnId, open) {
 }
 const closeMenus = () => setMenu(null, false);
 
+/* Set once init() has run to the end. init() awaits load(), which awaits
+   hydrateImages(), so the scripts being defined says nothing about the
+   document: until this is true, a stored photo can still be missing its src.
+   The test harness waits on it after every load. */
+let booted = false;
+
 async function init() {
   if (!(await load())) seed();
 
@@ -3684,6 +3699,15 @@ async function init() {
   syncUndo();
   paintAll();
   save();
+  // The editor's tools, for an AI agent in a browser with WebMCP (mcp.js),
+  // and the button that hands an agent the prompt to use them.
+  if (typeof registerAgentTools === 'function') {
+    registerAgentTools();
+    $('#agentBtn').addEventListener('click', copyAgentPrompt);
+  } else {
+    $('#agentBtn').style.display = 'none';     // .bar .icon would override [hidden]
+  }
+  booted = true;
 }
 
 document.addEventListener('DOMContentLoaded', init);

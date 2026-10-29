@@ -128,10 +128,12 @@ async function openApp(url) {
     return r.result.result.value;
   };
 
+  // `booted` rather than just the functions being defined: init() is async
+  // and only sets it once load() has finished pouring photos back in from
+  // IndexedDB, so a test never reads a half-restored document.
+  const READY = "document.readyState === 'complete' && typeof booted !== 'undefined' && booted";
   for (let i = 0; i < 60; i++) {
-    const ready = await evaluate(
-      "document.readyState === 'complete' && typeof paintAll === 'function' && typeof QR !== 'undefined'");
-    if (ready) break;
+    if (await evaluate(READY)) break;
     await sleep(200);
   }
 
@@ -174,7 +176,7 @@ async function openApp(url) {
       await loaded;
       for (let i = 0; i < 50; i++) {
         try {
-          if (await evaluate("typeof paintAll === 'function' && typeof QR !== 'undefined'")) return;
+          if (await evaluate(READY)) return;
         } catch (err) { /* the execution context is still swapping over */ }
         await sleep(100);
       }
