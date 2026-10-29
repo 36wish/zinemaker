@@ -56,6 +56,12 @@ than reimplementing it.
 | `pages.test.js` | the site served over HTTP from a project subpath |
 | `usability.test.js` | settings hand-back, mm fields, labels, photo frames, page turning, snapping, swatches, undo toasts and depth, fold guide |
 
+Every load the harness makes — the first one and each `page.reload()` — waits for
+`booted`, which `init()` sets on its last line. Waiting for the functions to be
+defined is not enough: `init()` awaits `load()`, which awaits `hydrateImages()`, so
+until then a stored photo still has its `assetId` but no `src` (about 1 load in 13
+read it that way before the flag existed).
+
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
 so a test that skips it will inherit the previous one's document. The same goes for
 the viewport: `page.emulate(w, h)` puts the shared window into a handset — size,
