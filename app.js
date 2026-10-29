@@ -3091,6 +3091,12 @@ function setMenu(btnId, open) {
 }
 const closeMenus = () => setMenu(null, false);
 
+/* Set once init() has run to the end. init() awaits load(), which awaits
+   hydrateImages(), so the scripts being defined says nothing about the
+   document: until this is true, a stored photo can still be missing its src.
+   The test harness waits on it after every load. */
+let booted = false;
+
 async function init() {
   if (!(await load())) seed();
 
@@ -3228,6 +3234,7 @@ async function init() {
   } else {
     $('#agentBtn').style.display = 'none';     // .bar .icon would override [hidden]
   }
+  booted = true;
 }
 
 document.addEventListener('DOMContentLoaded', init);
