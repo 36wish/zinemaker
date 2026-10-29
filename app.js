@@ -3213,6 +3213,8 @@ async function init() {
   syncUndo();
   paintAll();
   save();
+  // The editor's tools, for an AI agent in a browser with WebMCP (mcp.js).
+  if (typeof registerAgentTools === 'function') registerAgentTools();
 }
 
 document.addEventListener('DOMContentLoaded', init);

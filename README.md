@@ -4,8 +4,8 @@ A single-page editor for a **one-sheet zine**: eight panels imposed on one
 sheet of paper that folds into an eight-page booklet. Upload images, set
 text, insert QR codes, and export a print-ready PDF.
 
-No build step, no package manager, no dependencies, no server. Three files —
-`index.html`, `app.js`, `qr.js` — load directly in a browser, online or off.
+No build step, no package manager, no dependencies, no server. Four files —
+`index.html`, `app.js`, `qr.js`, `mcp.js` — load directly in a browser, online or off.
 
 ## Using it
 
@@ -79,6 +79,17 @@ After an export the app shows these folding steps with a diagram (you can
 turn that off). Print the PDF single-sided on one sheet, fold it down the two guide creases,
 then cut along the centre slit to open it into an eight-page booklet.
 
+### AI agents (WebMCP)
+
+In a browser that supports [WebMCP](https://webmachinelearning.github.io/webmcp/),
+the editor offers its tools to an AI agent working in that browser: read the
+zine, add and change text, photos (from a URL) and QR codes, apply layouts,
+recolour, clear and reorder pages, change print settings, undo and redo, look
+at a rendered preview, and download the PDF, PNG or `.zine`. Everything the
+agent does shows up on screen as it happens and is one undo step, so you can
+take any of it back. Positions are in millimetres and pages are numbered 1
+(cover) to 8 (back), as the editor shows them. Without WebMCP nothing changes.
+
 ## Development
 
 No build, no package manager, no dependency, no test framework beyond what's
@@ -86,7 +97,7 @@ in this repo.
 
 ```bash
 # Syntax check after editing
-node --check app.js && node --check qr.js
+node --check app.js && node --check qr.js && node --check mcp.js
 
 # Tests — needs Chrome (set CHROME=<path> if it's somewhere unusual)
 node test/run.js                     # everything, ~3s
