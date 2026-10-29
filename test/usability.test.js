@@ -393,6 +393,68 @@ module.exports = {
       assert.eq(r.staysShut, true, '"Don’t show after every export" sticks');
     });
 
+    t.check('printer alignment adds readings to the saved shift, per browser only', async () => {
+      await page.reset();
+      const r = await page.evaluate(`(() => {
+        setPrinterShift(4.25, 1);         // the numbers from a real printer
+        setSide(true);
+        $('#inspector [data-act="align"]').click();
+        const dlg = $('#alignDialog');
+        const out = { open: dlg.open, now: $('#alignNow').textContent };
+        $('#alignX').value = '-0.5'; $('#alignX').dispatchEvent(new Event('input'));
+        $('#alignY').value = '0.5'; $('#alignY').dispatchEvent(new Event('input'));
+        out.note = $('#alignNote').textContent;
+        $('#alignApply').click();
+        out.closed = !dlg.open;
+        out.shift = printerShift();
+        out.status = $('#inspector').textContent;
+        out.inState = JSON.stringify(state).indexOf('hift') >= 0;
+        showAlignDialog();
+        $('#alignReset').click();
+        out.reset = printerShift();
+        out.stored = localStorage.getItem(SHIFT_KEY);
+        out.statusAfter = $('#inspector').textContent;
+        setSide(false);
+        return out;
+      })()`);
+      assert.eq(r.open, true, 'the settings button opens the dialog');
+      assert.includes(r.now, '4.3 mm left and 1 mm up');
+      assert.includes(r.note, '3.8 mm left and 1.5 mm up', 'the note previews the result');
+      assert.eq(r.closed, true);
+      assert.deepEq(r.shift, { x: 3.75, y: 1.5 }, 'a reading is what is left, so it adds on');
+      assert.includes(r.status, 'Exports move everything 3.8 mm left and 1.5 mm up');
+      assert.eq(r.inState, false, 'the shift is the printer’s, never the document’s');
+      assert.deepEq(r.reset, { x: 0, y: 0 });
+      assert.eq(r.stored, null, 'reset forgets it');
+      assert.includes(r.statusAfter, 'Not adjusted');
+    });
+
+    t.check('the edge readings set the printer margin from the worst edge', async () => {
+      await page.reset({ margin: 5 });
+      const r = await page.evaluate(`(() => {
+        const set = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); };
+        showAlignDialog();
+        set('#alignX', '1'); set('#alignY', '0.5');
+        // Read off the PDF's edges, which the printer moved 1 right, 0.5 down:
+        // on paper that is left 3, right 2, top 1.5, bottom 3.5.
+        set('#alignEdge-l', '2'); set('#alignEdge-r', '3');
+        set('#alignEdge-t', '1'); set('#alignEdge-b', '4');
+        const note = $('#alignNote').textContent;
+        $('#alignApply').click();
+        const after = { margin: state.margin, shift: printerShift() };
+        showAlignDialog();
+        set('#alignX', '0.5');
+        $('#alignApply').click();
+        const blank = state.margin;
+        setPrinterShift(0, 0);
+        return { note: note, after: after, blank: blank };
+      })()`);
+      assert.includes(r.note, 'bottom edge needs the most, 3.5 mm');
+      assert.eq(r.after.margin, 4, 'rounded up to the half mm, and half a mm to spare');
+      assert.deepEq(r.after.shift, { x: 1, y: 0.5 });
+      assert.eq(r.blank, 4, 'with the edges left empty the margin stays put');
+    });
+
     t.check('a phone starts on one page unless a view was picked by hand', async () => {
       await page.reset();
       const r = await page.evaluate(`(async () => {

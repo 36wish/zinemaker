@@ -2018,6 +2018,10 @@ function projectSectionHtml() {
         : '') + '</div>' +
     '</div>' +
 
+    '<div class="grp"><h2>Printer alignment</h2>' +
+      '<div class="row"><button class="grow" data-act="align">Line up with your printer&hellip;</button></div>' +
+      '<div class="hint">' + alignStatus() + '</div></div>' +
+
     '<div class="grp"><h2>Print guides</h2>' +
       '<div class="row">' +
         '<label class="f" style="margin:0;flex:1">Cut line</label>' +
@@ -2091,6 +2095,7 @@ function pageSize(trimmed) {
 function helpHtml() {
   const on = v => v ? 'on' : 'off';
   const trim = state.trimMargin && state.margin > 0;
+  const shift = printerShift();
   const tabs = {
     edit: [
       { icon: 'spread', title: 'Spreads', sub: 'Pages',
@@ -2163,6 +2168,14 @@ function helpHtml() {
           'Cut the rim off along the printed line <b>before</b> folding and the zine ' +
           'reads edge to edge &mdash; just a slightly smaller booklet.',
         chips: ['Pages ' + pageSize(true), 'Paper cutter'] },
+      { icon: 'align', title: 'Printer alignment', sub: shift.x || shift.y
+          ? 'Shifted ' + shift.x + ' &middot; ' + shift.y + ' mm' : 'Not set',
+        body: 'Most printers put the image a few mm off where the PDF says, and a shifted ' +
+          'print folds off its page edges &mdash; a wider margin cannot fix that. Print the ' +
+          'test sheet and fold it in half each way: the creases read the error off its ' +
+          'scales, and every export moves back by that much. Its black edge bars set the ' +
+          'printer margin. Kept in this browser for this printer, not in the zine.',
+        chips: ['<b>Print settings</b> &rarr; Line up with your printer'] },
       { icon: 'guides', title: 'Print guides', sub: 'Lines',
         body: (state.cut || trim
           ? 'They fall on cuts you make anyway, so a tidy cut hides them.'
@@ -2566,6 +2579,7 @@ function wireInspector(side) {
     else if (a === 'del') removeSel();
     else if (a === 'edit') { const el = selected(); if (el) { setElemDrawer(false); startEdit(el.id, false); } }
     else if (a === 'fill') { const el = selected(); if (el) chooseFrame(el.id); }
+    else if (a === 'align') showAlignDialog();
     else if (a === 'clearPanel') {
       pushHistory();
       doc().panels[state.active] = blankPanel();
@@ -2709,7 +2723,7 @@ function buildSheetNode() {
     guideStroke(trim, g.sheetW - m, m, g.sheetW - m, g.sheetH - m, 0, 0, '#6e6e6e', '1');
     root.appendChild(trim);
   }
-  return root;
+  return shiftForPrinter(root);
 }
 
 /* Rasterise DOM without a library: serialise it into an SVG <foreignObject>
@@ -3059,6 +3073,9 @@ const GUIDE_ICONS = {
     '<rect x="10" y="40" width="14" height="14"/>' +
     '<path d="M15 15h4v4h-4zM45 15h4v4h-4zM15 45h4v4h-4zM32 10v6M32 22h4M40 32h6M30 32h4v4M44 42h6v6M36 50h4M50 54h4"/>',
   // Leave border: full-size pages, the printer's rim shaded over their outer edges.
+  align: '<rect x="6" y="12" width="52" height="40"/>' +
+    '<path class="thin" d="M14 32h36M32 18v28M20 30v4M26 30v4M38 30v4M44 30v4M30 24h4M30 40h4"/>' +
+    '<path class="ink" d="M35 12v40"/>',
   border: '<path class="fill" fill-rule="evenodd" d="M4 12h56v40H4zM8 16v32h48V16z"/>' +
     '<rect x="4" y="12" width="56" height="40"/>' +
     '<path class="thin" d="M18 12v40M32 12v40M46 12v40M4 32h56"/>',
@@ -3139,6 +3156,303 @@ function showFoldGuide(force) {
   if (!dlg.open) dlg.showModal();
 }
 
+/* ------------------------------------------------------- printer alignment
+
+   Most printers put the image a few mm off where the PDF says, and since every
+   fold lands on the middle of the paper, a shifted print folds off its page
+   edges — a wider margin hides the white edge but not that. So the export
+   moves everything the opposite way by however far this printer shifts it.
+
+   The shift belongs to the printer, not the zine, so it is a per-browser
+   preference like the recent colours and never reaches a .zine file. It is
+   stored as the printer's own error in mm, as the sheet is held landscape:
+   x > 0 means it prints too far right, y > 0 too low. */
+const SHIFT_KEY = 'zinemaker.printerShift';
+const SHIFT_MAX = 20;                 // mm, beyond any printer that still works
+const clampShift = v => Math.min(SHIFT_MAX, Math.max(-SHIFT_MAX,
+  Math.round((isFinite(v) ? v : 0) * 100) / 100));
+
+function printerShift() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SHIFT_KEY));
+    if (s) return { x: clampShift(+s.x), y: clampShift(+s.y) };
+  } catch (err) { /* private mode, or nothing saved */ }
+  return { x: 0, y: 0 };
+}
+
+function setPrinterShift(x, y) {
+  const s = { x: clampShift(x), y: clampShift(y) };
+  try {
+    if (!s.x && !s.y) localStorage.removeItem(SHIFT_KEY);
+    else localStorage.setItem(SHIFT_KEY, JSON.stringify(s));
+  } catch (err) { /* private mode */ }
+  return s;
+}
+
+/* Moves everything on an export sheet against the printer's shift. The white
+   rim moves with the artwork, so it lands back on the paper's edges; what is
+   pushed off the PDF's edge is rim the printer would have put off the paper. */
+function shiftForPrinter(root) {
+  const s = printerShift();
+  if (!s.x && !s.y) return root;
+  const inner = document.createElement('div');
+  inner.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;' +
+    'transform:translate(' + (-s.x * PT) + 'px,' + (-s.y * PT) + 'px)';
+  while (root.firstChild) inner.appendChild(root.firstChild);
+  root.appendChild(inner);
+  return root;
+}
+
+const fmtMm = v => String(Math.round(Math.abs(v) * 10) / 10);
+
+/* "4.3 mm right and 1 mm down", for a movement of x, y mm; '' for none. */
+function describeMove(x, y) {
+  const parts = [];
+  if (Math.abs(x) >= 0.05) parts.push(fmtMm(x) + ' mm ' + (x > 0 ? 'right' : 'left'));
+  if (Math.abs(y) >= 0.05) parts.push(fmtMm(y) + ' mm ' + (y > 0 ? 'down' : 'up'));
+  return parts.join(' and ');
+}
+
+/* The test sheet: folded in half each way, the creases fall on the middle of
+   the paper, and scales printed across them read off how far the printed
+   middle missed it. Read straight off the scale, so no ruler is needed. It
+   is built with the current correction already in, so a reading is what is
+   still left to correct, and a sheet printed after correcting reads zero.
+
+   A scale's labels are the negated offset of each tick: if the printer moves
+   the image right, the paper's middle falls on the scale's left half, so the
+   left half reads "+", meaning "prints too far right". Same downwards. */
+const SCALE_HALF = 15;                // mm either side of the middle
+
+/* The edge gauges, in mm: a bar GAUGE.bar wide running GAUGE.len in from
+   the edge, its ruler on the inner side. at(d, side) maps a distance d in
+   from that edge and an offset to the side of the bar (positive towards the
+   ruler) onto the sheet. The left and right bars sit below the middle, the
+   top and bottom ones to the right of it, clear of the scales and the notes. */
+const GAUGE = { bar: 3, len: 11 };
+const EDGE_GAUGES = (W, H) => {
+  const y0 = H / 2 + 30 * PT, x0 = W * 0.75;
+  return [
+    { edge: 'l', name: 'LEFT EDGE', anchor: 'start', at: (d, s) => [d, y0 + s] },
+    { edge: 'r', name: 'RIGHT EDGE', anchor: 'end', at: (d, s) => [W - d, y0 + s] },
+    { edge: 't', name: 'TOP EDGE', anchor: 'middle', across: true, at: (d, s) => [x0 + s, d] },
+    { edge: 'b', name: 'BOTTOM EDGE', anchor: 'middle', across: true, at: (d, s) => [x0 + s, H - d] }
+  ];
+};
+
+function buildCalibrationNode() {
+  const g = geom(), W = g.sheetW, H = g.sheetH, cx = W / 2, cy = H / 2;
+  const s = printerShift(), m = clampMargin(state.margin) * PT;
+  const root = document.createElement('div');
+  root.style.cssText = 'position:relative;overflow:hidden;background:#ffffff;width:' +
+                       W + 'px;height:' + H + 'px';
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('style', 'position:absolute;left:0;top:0');
+  root.appendChild(svg);
+
+  const ink = '#111111', soft = '#8a8a8a';
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(k => n.setAttribute(k, attrs[k]));
+    if (text != null) n.textContent = text;
+    svg.appendChild(n);
+    return n;
+  };
+  const line = (x1, y1, x2, y2, w, colour, dash) => add('line', Object.assign(
+    { x1: x1, y1: y1, x2: x2, y2: y2, stroke: colour || ink, 'stroke-width': w || 0.4 },
+    dash ? { 'stroke-dasharray': dash } : {}));
+  const text = (x, y, str, size, anchor, extra) => add('text', Object.assign({
+    x: x, y: y, 'font-family': 'Helvetica, Arial, sans-serif', 'font-size': size || 7,
+    'text-anchor': anchor || 'start', fill: ink }, extra || {}), str);
+  const signed = v => v > 0 ? '+' + v : v < 0 ? '−' + (-v) : '0';
+
+  // Ticks every half mm, longer every mm, longest and labelled every 5 mm.
+  const tickLen = k => (k % 10 === 0 ? 4.5 : k % 2 === 0 ? 2.6 : 1.5) * PT;
+  const hScale = y0 => {
+    const r = SCALE_HALF * PT;
+    text(cx, y0 - 5 * PT, 'LEFT – RIGHT: where does the up-and-down crease cross?', 6.5, 'middle',
+         { 'font-weight': 'bold' });
+    line(cx - r, y0, cx + r, y0, 0.5);
+    for (let k = -2 * SCALE_HALF; k <= 2 * SCALE_HALF; k++) {
+      const x = cx + k * PT / 2;
+      line(x, y0, x, y0 + tickLen(k), k ? 0.35 : 0.8);
+      if (k % 10 === 0) text(x, y0 + tickLen(k) + 7, signed(-k / 2), 7, 'middle');
+    }
+    text(cx - r - 3, y0 + 3, '+  too far right', 6.5, 'end', { fill: soft });
+    text(cx + r + 3, y0 + 3, 'too far left  −', 6.5, 'start', { fill: soft });
+  };
+  const vScale = x0 => {
+    const r = SCALE_HALF * PT;
+    text(x0, cy - r - 12, 'UP – DOWN: where does the', 6.5, 'middle', { 'font-weight': 'bold' });
+    text(x0, cy - r - 4.5, 'side-to-side crease cross?', 6.5, 'middle', { 'font-weight': 'bold' });
+    line(x0, cy - r, x0, cy + r, 0.5);
+    for (let k = -2 * SCALE_HALF; k <= 2 * SCALE_HALF; k++) {
+      const y = cy + k * PT / 2;
+      line(x0, y, x0 + tickLen(k), y, k ? 0.35 : 0.8);
+      if (k % 10 === 0) text(x0 + tickLen(k) + 2, y + 2.4, signed(-k / 2), 7, 'start');
+    }
+    text(x0 - 3, cy - r + 6, '+ too low', 6.5, 'end', { fill: soft });
+    text(x0 - 3, cy + r - 1, '− too high', 6.5, 'end', { fill: soft });
+  };
+  // Two of each: if a pair disagree, the paper went through crooked.
+  hScale(H * 0.3); hScale(H * 0.7);
+  vScale(W * 0.3); vScale(W * 0.7);
+
+  // Bars of known length: a print that is scaled will not measure up.
+  const bw = 200 * PT, by = H - 22 * PT;
+  line(cx - bw / 2, by, cx + bw / 2, by, 0.6);
+  line(cx - bw / 2, by - 3 * PT, cx - bw / 2, by + 3 * PT, 0.6);
+  line(cx + bw / 2, by - 3 * PT, cx + bw / 2, by + 3 * PT, 0.6);
+  text(cx, by - 4, '200 mm — if it measures anything else, the print dialog is ' +
+       'scaling the page: set it to 100% / actual size', 6.5, 'middle');
+  const bh = 150 * PT, bx = W - 40 * PT;
+  line(bx, cy - bh / 2, bx, cy + bh / 2, 0.6);
+  line(bx - 3 * PT, cy - bh / 2, bx + 3 * PT, cy - bh / 2, 0.6);
+  line(bx - 3 * PT, cy + bh / 2, bx + 3 * PT, cy + bh / 2, 0.6);
+  text(bx - 4, cy, '150 mm', 6.5, 'middle', { transform: 'rotate(-90 ' + (bx - 4) + ' ' + cy + ')' });
+
+  /* Edge gauges: a black bar printed right off each edge of the paper, with
+     a ruler beside it measured from that edge. The printer leaves blank
+     whatever strip it cannot reach, so the mark where the black begins is
+     how much margin that edge needs. EDGE_GAUGES says where each one is. */
+  EDGE_GAUGES(W, H).forEach(gauge => {
+    const at = (d, side) => gauge.at(d * PT, side * PT);
+    const a = at(0, -GAUGE.bar), b = at(GAUGE.len, 0);
+    add('rect', { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]),
+                  width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]), fill: ink });
+    for (let k = 1; k <= 2 * GAUGE.len; k++) {
+      const p = at(k / 2, 0), q = at(k / 2, k % 4 === 0 ? 2.6 : k % 2 === 0 ? 1.8 : 1.1);
+      line(p[0], p[1], q[0], q[1], 0.35);
+      if (k % 4 === 0) {
+        const t = at(k / 2, 3.4);
+        if (gauge.across) text(t[0], t[1] + 2, String(k / 2), 5.5, 'start');
+        else text(t[0], t[1] + 4.2, String(k / 2), 5.5, 'middle');
+      }
+    }
+    const c = at(GAUGE.len + 2, -GAUGE.bar / 2);
+    text(c[0], c[1] + 2.2, gauge.name, 6, gauge.anchor, { 'font-weight': 'bold' });
+  });
+
+  const left = Math.max(m, 0) + 12 * PT;
+  let ty = Math.max(m, 0) + 14 * PT;
+  const say = (str, size, bold) => {
+    text(left, ty, str, size || 7.5, 'start', bold ? { 'font-weight': 'bold' } : {});
+    ty += (size || 7.5) * 1.45;
+  };
+  say('Printer alignment test sheet · ' + PAPER[state.paper].label, 11, true);
+  ty += 3;
+  say('1. Print this on one side, landscape, at 100% / actual size — the way you print your zine.');
+  say('2. Fold it in half left edge to right edge, corners exactly together. Crease, unfold.');
+  say('3. Fold it in half top edge to bottom edge. Crease, unfold.');
+  say('4. Read where each crease crosses its scale and type the numbers into Zinemaker.');
+  say('5. On each edge, read the mark where the black bar begins (each tick is half a mm) and type those in too.');
+  say('If the two scales of a pair read differently, the paper fed in crooked: use the average.', 6.5);
+  if (s.x || s.y) {
+    say('Already corrected: everything moves ' + describeMove(-s.x, -s.y) +
+        '. A sheet that needs nothing more reads 0 on every scale.', 6.5);
+  }
+  return shiftForPrinter(root);
+}
+
+async function canvasPdf(cv, g) {
+  // High quality: at 300 dpi the artefacts that matter are the ones
+  // around black text on white, and they show up in print.
+  const jpegBlob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.94));
+  const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
+  return buildPDF([{ jpeg: jpeg, pxW: cv.width, pxH: cv.height, ptW: g.sheetW, ptH: g.sheetH }]);
+}
+
+async function exportCalibration() {
+  toast('Rendering the test sheet...');
+  try {
+    const g = geom();
+    const cv = await rasterize(buildCalibrationNode(), g.sheetW, g.sheetH, DPI / 72);
+    download(await canvasPdf(cv, g), 'printer-test-sheet.pdf');
+    toast('Saved printer-test-sheet.pdf', 2200);
+  } catch (err) {
+    console.error(err);
+    toast('Export failed: ' + err.message, 4000);
+  }
+}
+
+/* The dialog the test sheet goes with. A reading is what is left to correct,
+   so it adds onto the shift already saved. */
+function showAlignDialog() {
+  const dlg = $('#alignDialog');
+  if (!dlg || typeof dlg.showModal !== 'function') return;
+  ['#alignX', '#alignY', '#alignEdge-l', '#alignEdge-t', '#alignEdge-r', '#alignEdge-b']
+    .forEach(id => { $(id).value = ''; });
+  syncAlignNote();
+  if (!dlg.open) dlg.showModal();
+}
+
+function alignReadings() {
+  const v = id => { const n = parseFloat($(id).value); return isFinite(n) ? n : 0; };
+  return { x: v('#alignX'), y: v('#alignY') };
+}
+
+/* What the edge readings ask of the margin, or null with none typed in. A
+   gauge is measured from the edge of the PDF, which the printer moved by
+   what the creases read (x, y), so each is turned into a distance from the
+   edge of the *paper* first: the image moving right widens the left strip and
+   narrows the right. Once the new correction lines the two up, the margin
+   has to cover the worst edge. Rounded up to a half mm, plus half a mm more,
+   since the paper never feeds twice to the same spot. */
+function edgeNeeds(r) {
+  const read = { l: r.x, r: -r.x, t: r.y, b: -r.y };
+  let worst = null;
+  ['l', 't', 'r', 'b'].forEach(k => {
+    const n = parseFloat($('#alignEdge-' + k).value);
+    if (!isFinite(n)) return;
+    const need = Math.max(0, n + read[k]);
+    if (!worst || need > worst.need) worst = { edge: k, need: need };
+  });
+  if (!worst) return null;
+  worst.margin = clampMargin(Math.ceil(worst.need * 2 - 1e-9) / 2 + 0.5);
+  return worst;
+}
+
+const EDGE_WORDS = { l: 'left', r: 'right', t: 'top', b: 'bottom' };
+
+/* One line for the settings column: what the export does about this printer. */
+function alignStatus() {
+  const s = printerShift(), d = describeMove(-s.x, -s.y);
+  return d ? 'Exports move everything ' + d + '.' : 'Not adjusted.';
+}
+
+function syncAlignNote() {
+  const s = printerShift(), r = alignReadings();
+  const now = describeMove(-s.x, -s.y);
+  const next = describeMove(-(s.x + r.x), -(s.y + r.y));
+  $('#alignNow').textContent = now
+    ? 'Right now, exports move everything ' + now + '.'
+    : 'Right now, exports are not adjusted.';
+  const e = edgeNeeds(r);
+  $('#alignNote').textContent = ((r.x || r.y)
+    ? (next ? 'After this, exports will move everything ' + next + '.'
+            : 'After this, exports will not be adjusted.')
+    : '') + (e
+    ? ' The ' + EDGE_WORDS[e.edge] + ' edge needs the most, ' + fmtMm(e.need) +
+      ' mm, so the printer margin will be ' + e.margin + ' mm (it is ' + state.margin + ' mm now).'
+    : '');
+  $('#alignReset').hidden = !now;
+}
+
+function applyAlign() {
+  const s = printerShift(), r = alignReadings();
+  const n = setPrinterShift(s.x + r.x, s.y + r.y);
+  const e = edgeNeeds(r);
+  $('#alignDialog').close();
+  if (e) { state.margin = e.margin; save(); }
+  paintAll();
+  const d = describeMove(-n.x, -n.y);
+  toast((d ? 'Exports now move everything ' + d + '.' : 'Exports are no longer adjusted.') +
+        (e ? ' Printer margin ' + e.margin + ' mm.' : ''), 3600);
+}
+
 async function exportSheet(kind) {
   const wasSel = selId;
   stopEdit(); selId = null; paintPage();
@@ -3150,12 +3464,7 @@ async function exportSheet(kind) {
       const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
       download(blob, slug(state.title) + '.png');
     } else {
-      // High quality: at 300 dpi the artefacts that matter are the ones
-      // around black text on white, and they show up in print.
-      const jpegBlob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.94));
-      const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
-      const pdf = buildPDF([{ jpeg: jpeg, pxW: cv.width, pxH: cv.height, ptW: g.sheetW, ptH: g.sheetH }]);
-      download(pdf, slug(state.title) + '.pdf');
+      download(await canvasPdf(cv, g), slug(state.title) + '.pdf');
     }
     toast('Saved ' + slug(state.title) + '.' + kind, 2200);
     showFoldGuide();
@@ -3266,6 +3575,16 @@ async function init() {
   $('#foldClose').addEventListener('click', () => $('#foldDialog').close());
   $('#foldNoShow').addEventListener('change', e => {
     try { localStorage.setItem(FOLD_KEY, e.target.checked ? 'off' : 'on'); } catch (err) { /* private mode */ }
+  });
+  $('#alignSheet').addEventListener('click', exportCalibration);
+  $('#alignDialog').querySelectorAll('input').forEach(i => i.addEventListener('input', syncAlignNote));
+  $('#alignCancel').addEventListener('click', () => $('#alignDialog').close());
+  $('#alignApply').addEventListener('click', applyAlign);
+  $('#alignReset').addEventListener('click', () => {
+    setPrinterShift(0, 0);
+    $('#alignDialog').close();
+    buildInspector();
+    toast('Exports are no longer adjusted.', 2600);
   });
   $('#nextPage').addEventListener('click', () => turnPage(1));
   $('#redo').addEventListener('click', redo);

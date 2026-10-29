@@ -50,11 +50,11 @@ than reimplementing it.
 |---|---|
 | `qr.test.js` | the encoder, in plain Node (`qr.js` is requireable) |
 | `editor.test.js` | elements, spread selection, synthesised drag/rotate gestures, templates, undo, help dialog and tabs |
-| `print.test.js` | imposition, margins and guides, measured off the 300 dpi raster |
+| `print.test.js` | imposition, margins and guides, the printer shift and its test sheet, measured off the raster |
 | `files.test.js` | the `.zine` container and the PDF, byte by byte |
 | `mobile.test.js` | the phone layout, measured on an emulated handset |
 | `pages.test.js` | the site served over HTTP from a project subpath |
-| `usability.test.js` | settings hand-back, mm fields, labels, photo frames, page turning, snapping, swatches, undo toasts and depth, fold guide |
+| `usability.test.js` | settings hand-back, mm fields, labels, photo frames, page turning, snapping, swatches, undo toasts and depth, fold guide, printer alignment dialog |
 
 Call `await page.reset({...})` at the top of a browser test; suites share one page,
 so a test that skips it will inherit the previous one's document. The same goes for
@@ -498,6 +498,40 @@ setting). "Don't show after every export" is a per-browser preference under
 3. `buildPDF()` writes the PDF by hand: one page, one baseline-JPEG XObject scaled to
    the MediaBox. It tracks byte offsets for the xref table, so **any change to what
    gets written must keep `off[]` and the `/Length` values in step**.
+
+### Printer alignment
+
+Printers put the image a few mm off where the PDF says, and a shifted print
+folds off its page edges (folds land on the middle of the *paper*), which no
+margin can fix. So `shiftForPrinter()` wraps everything `buildSheetNode()`
+built — white rim included — in one `translate()` against the printer's own
+error, read by `printerShift()`. That error is stored as `{x, y}` mm under
+`zinemaker.printerShift` (x > 0: prints too far right, y > 0: too low), a
+per-browser preference like the recent colours: it belongs to the printer, so
+it is never in `state` and never in a `.zine` file.
+
+The "Printer alignment" group in `projectSectionHtml()` opens `#alignDialog`
+(`showAlignDialog()`, a `.guide` card like help and the folding guide, holding
+a form rather than drawings), which offers `exportCalibration()`'s test sheet.
+Help's Print tab has a row for it that shows the saved shift. That
+sheet (`buildCalibrationNode()`) carries scales across the middle of the
+paper: fold it in half each way and each crease reads off how far the printed
+middle missed. **The sheet is built with the current correction already in**, so
+a reading is what is *left* to correct and `applyAlign()` adds it onto the
+saved shift — a sheet printed after correcting reads zero, which doubles as
+the check. Its labels are the negated tick offset, so the left half reads "+"
+(too far right), because that is where the crease falls when the image moved
+right. `print.test.js` measures both the shifted rim and where the scale's
+zero lands.
+
+The same sheet measures the margin the printer needs: `EDGE_GAUGES` puts a
+black bar running off each edge with a ruler (mm from that edge) beside it,
+and where the black begins on paper is how close that edge can print. The
+dialog's four edge fields go through `edgeNeeds()`, which first turns each
+reading into a distance from the *paper's* edge using the crease readings (the
+image moving right widens the left strip and narrows the right), then sets
+`state.margin` on Apply to the worst edge rounded up to 0.5 mm plus 0.5 mm for
+feed wobble. Empty edge fields leave the margin alone.
 
 ### The `.zine` file
 
