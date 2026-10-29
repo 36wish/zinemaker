@@ -533,7 +533,10 @@ just never sees the tools, so it costs the static-page rule nothing.
 `registerAgentTools()` runs at the end of `init()` and prefers
 `document.modelContext` (the current draft: `registerTool(tool, { signal })`,
 unregistered by aborting the signal, and whatever `execute` resolves to is
-handed over as JSON) over `navigator.modelContext` (earlier previews and the
+handed over as JSON — so a refused call **resolves** to `{ error }` there
+rather than throwing, because Chrome replaces anything `execute` throws with a
+generic "invocation failed" and the agent would never hear the reason) over
+`navigator.modelContext` (earlier previews and the
 MCP-B polyfill, which expect an MCP `CallToolResult`, so `agentContent()` wraps
 results in content blocks there, a preview as an image block). Chrome's own
 `executeTool()` takes the arguments as an object in some versions and as JSON

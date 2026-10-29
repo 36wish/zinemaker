@@ -39,7 +39,18 @@ module.exports = {
           try { out = await mc.executeTool(add, args); }
           catch (err) { out = await mc.executeTool(add, JSON.stringify(args)); }
         }
-        return { native: true, names: tools.map(t => t.name), out: out,
+        // Chrome replaces whatever execute throws with a generic failure, so
+        // the reason only reaches the agent if the refusal resolves.
+        let refused = null;
+        const bad = { page: 3, text: 'x', font: 'Papyrus' };
+        if (add) {
+          try { refused = await mc.executeTool(add, bad); }
+          catch (err) {
+            try { refused = await mc.executeTool(add, JSON.stringify(bad)); }
+            catch (err2) { refused = 'threw: ' + err.message; }
+          }
+        }
+        return { native: true, names: tools.map(t => t.name), out: out, refused: refused,
                  placed: doc().panels[2].els.map(e => e.text) };
       })()`);
       if (!r.native) return;            // this Chrome has no WebMCP: the fakes below still cover it
@@ -47,6 +58,8 @@ module.exports = {
       ours.forEach(n => assert.ok(r.names.indexOf(n) >= 0, n + ' is listed'));
       assert.eq(JSON.parse(r.out).text, 'from the agent', 'the result comes back as JSON');
       assert.deepEq(r.placed, ['from the agent']);
+      assert.includes(JSON.parse(r.refused).error, 'font must be one of',
+        'the agent hears why a call was refused: ' + r.refused);
     });
 
     t.check('every tool registers with document.modelContext, and registering again replaces them', async () => {
@@ -67,6 +80,9 @@ module.exports = {
         const second = registerAgentTools();
         const tools = seen.slice(first).map(s => s.tool);
         const ran = await tools.find(t => t.name === 'get_zine').execute({}, {});
+        const before = hist.length;
+        const refused = await tools.find(t => t.name === 'add_text').execute({ page: 1, txt: 'typo' }, {});
+        const refusedSteps = hist.length - before;
         delete document.modelContext;
         registerAgentTools();             // back onto the browser's own, if it has one
         return {
@@ -77,7 +93,8 @@ module.exports = {
           noDescription: tools.filter(t => !t.description).map(t => t.name),
           badSchema: tools.filter(t => t.inputSchema.type !== 'object' ||
             (t.inputSchema.required || []).some(k => !t.inputSchema.properties[k])).map(t => t.name),
-          plainResult: typeof ran.title === 'string' && !ran.content
+          plainResult: typeof ran.title === 'string' && !ran.content,
+          refused: refused, refusedSteps: refusedSteps
         };
       })()`);
       assert.ok(r.first >= 10, 'registered ' + r.first + ' tools');
@@ -88,6 +105,9 @@ module.exports = {
       assert.deepEq(r.noDescription, [], 'every tool has a description');
       assert.deepEq(r.badSchema, [], 'every schema is an object whose required keys exist');
       assert.eq(r.plainResult, true, 'the current draft gets the plain result');
+      assert.includes(r.refused && r.refused.error, 'Unknown property "txt"',
+        'a refusal resolves with its reason instead of throwing it away');
+      assert.eq(r.refusedSteps, 0);
     });
 
     t.check('an older navigator.modelContext gets MCP content blocks, errors included', async () => {
