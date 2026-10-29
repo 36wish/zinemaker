@@ -2940,9 +2940,7 @@ async function saveZine() {
 
   const blob = new Blob(parts, { type: 'application/octet-stream' });
   download(blob, slug(state.title) + '.zine');
-  const plain = JSON.stringify(Object.assign({}, meta, { docs: state.docs })).length;
-  toast('Saved ' + slug(state.title) + '.zine — ' + kb(blob.size) +
-        ' (' + Math.max(0, Math.round((1 - blob.size / plain) * 100)) + '% smaller than JSON)', 3200);
+  toast('Saved ' + slug(state.title) + '.zine — ' + kb(blob.size), 3200);
 }
 
 const kb = n => n < 1024 ? n + ' B'
